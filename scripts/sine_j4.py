@@ -25,6 +25,7 @@ class SineJ4:
         self.last_joints = None
         self.initial_joints = None  # To store joint positions at the start of rollout
         self.DOF = DOF
+        self.time = 0.0
 
         # Subscriber to get joint states
         self.follower_position_subscriber = rospy.Subscriber(
@@ -45,6 +46,7 @@ class SineJ4:
                 if cmd == 'r':
                     if self.last_joints is not None:
                         self.initial_joints = list(self.last_joints)  # Save initial joint positions
+                        self.time = 0.0
                         self.state = "ROLLOUT"
                         print(f"--> Switched to: {self.state}")
                     else:
@@ -75,19 +77,21 @@ class SineJ4:
         dt = 0.02  # 50Hz for updates
         rate = rospy.Rate(1 / dt)
 
-        time = 0.0
-        max_angle = 1.57  # Maximum allowable angle in radians for safety
-        min_angle = 0.0
+        self.time = 0.0
+        max_angle = 2.0  # Maximum allowable angle in radians for safety
+        min_angle = 0.5
 
         while not rospy.is_shutdown() and self.running:
             if self.state == "ROLLOUT":
                 if self.initial_joints is not None:
                     # Apply sine wave motion to joint 4 with clamping
                     target_positions = list(self.initial_joints)  # Use saved initial joint positions
-                    sine_wave = 0.5 * math.sin(2 * math.pi * 0.5 * time)  # 0.5 rad amplitude, 0.5 Hz frequency
-                    target_positions[3] += np.clip(sine_wave, min_angle, max_angle)  # Clamp the angle
+                    sine_wave = 0.5 * math.sin(2 * math.pi * 0.01 * self.time)  # 0.5 rad amplitude, 0.5 Hz frequency
+                    target_positions[3] += sine_wave  
+                    target_positions[3] = np.clip(target_positions[3], min_angle, max_angle)
+                    # rospy.loginfo(f"{target_positions[3]} - {self.last_joints[3]} - {sine_wave}")
                     self.udp.send_data(target_positions, [0.0] * self.DOF, [0.0] * self.DOF)
-                    time += dt
+                    self.time += dt
 
             elif self.state == "IDLE":
                 pass  # Do nothing
