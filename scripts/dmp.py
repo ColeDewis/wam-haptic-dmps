@@ -6,13 +6,13 @@ import rospy
 from movement_primitives.dmp import DMP
 from sensor_msgs.msg import JointState
 from wam_haptic_dmps.udp_handler import TeleopUDPHandler
-from wam_teleop.msg import GravityTorque
+import numpy as np
 
 
 class DMPLearner:
-    def __init__(self, remote_ip="127.0.0.1", send_port=5556, DOF=7):
+    def __init__(self, remote_ip="127.0.0.1", send_port=5556, DOF=7, dt=0.01):
         # UDP connection (send only)
-        self.udp = TeleopUDPHandler(remote_ip, send_port, recv_port=None)
+        self.udp = TeleopUDPHandler(remote_ip, send_port, recv_port=None, DOF=DOF)
         
         # 2. State Management
         self.state = "IDLE"  # Possible: IDLE, LEARN, ROLLOUT, QUIT
@@ -24,14 +24,16 @@ class DMPLearner:
         self.input_thread = threading.Thread(target=self._keyboard_loop, daemon=True)
         self.input_thread.start()
         
+        # TODO: switch to learder follower setup
         self.follower_position_subscriber = rospy.Subscriber("/follower/joint_states", JointState, self.follower_pos_callback)
-        self.leader_external_torque_subscriber = rospy.Subscriber("/leader/external_torque", GravityTorque, self.external_torque_callback)
+        # self.leader_external_torque_subscriber = rospy.Subscriber("/leader/external_torque", GravityTorque, self.external_torque_callback)
 
         self.trajectory_buffer = []
         self.last_joints = None
-        self.DOF = DOF
+        self.dof = DOF
         self.dmp = DMP(n_dims=DOF)
         self.dmp_goal = None
+        self.dt = dt
 
         print("--- DMP Learner Initialized ---")
         print("Commands: [s] Start Learning, [f] Finetune, [r] Rollout, [i] Idle, [q] Quit")
@@ -92,7 +94,10 @@ class DMPLearner:
         """
         if self.trajectory_buffer:
             print("Training DMP with recorded trajectory...")
-            self.dmp.imitate(self.trajectory_buffer)
+            n_steps = len(self.trajectory_buffer)
+            execution_time = (n_steps - 1) * self.dt
+            T = np.linspace(0, execution_time, n_steps)
+            self.dmp.imitate(T, np.array(self.trajectory_buffer))
             
             print("DMP training complete.")
             self.trajectory_buffer = []  # Clear the buffer after saving
@@ -104,23 +109,21 @@ class DMPLearner:
         Callback for receiving WAM joint states. This is where you would
         typically record data during the LEARN phase or use it during ROLLOUT.
         """
-        self.last_joints = msg.position[:self.DOF] 
-        self.last_jv = msg.velocity[:self.DOF]
+        self.last_joints = msg.position[:self.dof] 
+        self.last_jv = msg.velocity[:self.dof]
         if self.state == "LEARN" and self.learning_active:
             # Record the data for learning
-            self.trajectory_buffer.append(msg.position[:self.DOF]) 
+            self.trajectory_buffer.append(msg.position[:self.dof]) 
 
-    def external_torque_callback(self, msg: GravityTorque):
-        # TODO not sure we actually need this here at all for now tbh
-        pass
+    # def external_torque_callback(self, msg: GravityTorque):
+    #     # TODO not sure we actually need this here at all for now tbh
+    #     pass
 
     def run(self):
         """
         Main Control Loop (Real-time, e.g. 500Hz)
         """
-        dt = 0.02  # 50Hz for DMP updates, can be adjusted as needed
-        
-        rate = rospy.Rate(1/dt)
+        rate = rospy.Rate(1/self.dt)
         
         while not rospy.is_shutdown() and self.running:
             
@@ -142,7 +145,7 @@ class DMPLearner:
                 # self.dmp.configure()
                 if self.last_joints is not None:
                     y, yd = self.dmp.step(self.last_joints, self.last_jv)
-                    self.udp.send_data(y, yd, [0.0]*self.DOF)
+                    self.udp.send_data(y, yd, np.zeros(self.dof))
 
             rate.sleep()
 
@@ -152,7 +155,7 @@ if __name__ == "__main__":
     rospy.init_node('dmp_learner')
     
     # Initialize
-    learner = DMPLearner(remote_ip="127.0.0.1", send_port=5556)
+    learner = DMPLearner(remote_ip="127.0.0.1", send_port=5556, DOF=4)
     
     # Start the main loop
     try:

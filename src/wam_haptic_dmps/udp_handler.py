@@ -1,10 +1,11 @@
 import socket
 import struct
 import time
+import numpy as np
 
 
 class TeleopUDPHandler:
-    def __init__(self, remote_ip, send_port, recv_port=None, dof=7):
+    def __init__(self, remote_ip, send_port, recv_port=None, DOF=7):
         """
         :param remote_ip: IP address of the target (e.g., '127.0.0.1')
         :param send_port: The port the target is listening on.
@@ -12,7 +13,7 @@ class TeleopUDPHandler:
                           If None, this instance is SEND-ONLY.
         :param dof: Degrees of freedom (default 7).
         """
-        self.dof = dof
+        self.dof = DOF
         self.remote_ip = remote_ip
         self.send_port = send_port
         self.recv_port = recv_port
@@ -20,7 +21,7 @@ class TeleopUDPHandler:
         
         # Structure format: 3 vectors of doubles
         # 'd' = double (8 bytes) -> 21 doubles for 7-DOF
-        self.fmt = f'{dof * 3}d'
+        self.fmt = f'{self.dof * 3}d'
         self.packet_size = struct.calcsize(self.fmt)
 
         # 1. Sender Socket (Always created)
@@ -49,7 +50,7 @@ class TeleopUDPHandler:
             print(f"Error: All inputs must be lists of size {self.dof}")
             return
 
-        payload = jp + jv + torque
+        payload = np.concatenate([jp, jv, torque])
         
         try:
             data_bytes = struct.pack(self.fmt, *payload)
@@ -91,16 +92,18 @@ class TeleopUDPHandler:
 
 # --- USAGE EXAMPLE ---
 if __name__ == "__main__":    
-    udp = TeleopUDPHandler(remote_ip="127.0.0.1", send_port=5556, recv_port=None)
+    # TODO: change this with rosparam
+    dof = 4
+    udp = TeleopUDPHandler(remote_ip="127.0.0.1", send_port=5556, recv_port=None, DOF=dof)
 
     try:
         t = 0
         while True:
-            my_jp = [0.0] * 7
+            my_jp = [0.0] * dof
             my_jp[0] = 0.5 # Just move joint 1
             
-            my_jv = [0.0] * 7
-            my_tau = [0.0] * 7
+            my_jv = [0.0] * dof
+            my_tau = [0.0] * dof
             
             # 2. Send (No receive needed)
             udp.send_data(my_jp, my_jv, my_tau)
