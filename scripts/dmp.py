@@ -30,7 +30,7 @@ class DMPLearner:
         self.trajectory_buffer = []
         self.last_joints = None
         self.dof = DOF
-        self.dmp = DMP(n_dims=DOF, dt=dt)
+        self.dmp = DMP(n_dims=DOF, dt=dt, n_weights_per_dim=20)
         self.dmp_goal = None
         self.dt = dt
         self.last_record_time = rospy.Time(0)
@@ -44,7 +44,7 @@ class DMPLearner:
         """
         while self.running and not rospy.is_shutdown():
             try:
-                cmd = input().strip().lower()
+                cmd = input(">>>").strip().lower()
                 
                 if self.state == "LEARN" and self.learning_active:
                     # Handle commands during learning
@@ -62,6 +62,22 @@ class DMPLearner:
                         print("--> Learning aborted. Returning to IDLE.")
                     else:
                         print(f"Unknown command: {cmd}. Options: [save], [restart], [quit]")
+                elif self.state == "ROLLOUT":
+                    if cmd == "s":
+                        self.learning_active = False
+                elif self.state == "FINISH":
+                    print("Rollout done. Options: [save], [quit]")
+                    if cmd == 'save':
+                        self._save_trajectory()
+                        self.state = "IDLE"
+                        self.learning_active = False
+                        print("--> Trajectory saved. Returning to IDLE.")
+                    elif cmd == 'quit':
+                        self.state = "IDLE"
+                        self.learning_active = False
+                        print("--> Learning aborted. Returning to IDLE.")
+                    else:
+                        print(f"Unknown command: {cmd}. Options: [save], [quit]")
                 else:
                     # Handle commands outside of learning
                     if cmd == 's':
@@ -71,7 +87,9 @@ class DMPLearner:
                         print(f"--> Switched to: {self.state}. Options: [save], [restart], [quit]")
                     elif cmd == 'r':
                         self.state = "ROLLOUT"
-                        print(f"--> Switched to: {self.state}")
+                        self.learning_active = True
+                        self.trajectory_buffer = []
+                        print(f"--> Switched to: {self.state}.")
                     elif cmd == 'i':
                         self.state = "IDLE"
                         print(f"--> Switched to: {self.state}")
@@ -110,7 +128,7 @@ class DMPLearner:
         """
         self.last_joints = msg.position[:self.dof] 
         self.last_jv = msg.velocity[:self.dof]
-        if self.state == "LEARN" and self.learning_active:
+        if self.state in ("LEARN", "ROLLOUT") and self.learning_active:
             # Record the data for learning
             now = rospy.Time.now()
             
@@ -144,11 +162,14 @@ class DMPLearner:
                 # Execute the learned DMP
                 if self.last_joints is not None and not (self.dmp.start_y == self.dmp.goal_y).all():
                     y, yd = self.dmp.step(self.last_joints, self.last_jv)
-                    if (yd < 0.0001).all():
-                        self.state = "IDLE"
-                        print(f"reached end of DMP trajectory after {count} steps, entering IDLE.")
+                    if (yd < 0.001).all() and count > 300:
+                        self.state = "FINISH"
+                        self.learning_active = False
+                        self.dmp.reset()
+                        print(f"reached end of DMP trajectory after {count} steps, entering FINISH.")
+                        count = 0
                     else:
-                        print(count, y, yd)
+                        # print(count, y, yd)
                         count += 1
                         self.udp.send_data(y, np.zeros(self.dof), np.zeros(self.dof))
                 else:
