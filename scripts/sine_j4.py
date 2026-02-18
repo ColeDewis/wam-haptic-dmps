@@ -90,6 +90,7 @@ class SineJ4:
                     target_positions[3] += sine_wave  
                     target_positions[3] = np.clip(target_positions[3], min_angle, max_angle)
                     # rospy.loginfo(f"{target_positions[3]} - {self.last_joints[3]} - {sine_wave}")
+                    rospy.loginfo(f"{target_positions[3] - self.initial_joints[3]} - {sine_wave}")
                     self.udp.send_data(target_positions, [0.0] * self.DOF, [0.0] * self.DOF)
                     self.time += dt
 

@@ -10,7 +10,7 @@ import numpy as np
 
 
 class DMPLearner:
-    def __init__(self, remote_ip="127.0.0.1", send_port=5556, DOF=7, dt=0.01):
+    def __init__(self, remote_ip="127.0.0.1", send_port=5556, DOF=7, dt=0.02):
         # UDP connection (send only)
         self.udp = TeleopUDPHandler(remote_ip, send_port, recv_port=None, DOF=DOF)
         
@@ -26,17 +26,17 @@ class DMPLearner:
         
         # TODO: switch to learder follower setup
         self.follower_position_subscriber = rospy.Subscriber("/follower/joint_states", JointState, self.follower_pos_callback)
-        # self.leader_external_torque_subscriber = rospy.Subscriber("/leader/external_torque", GravityTorque, self.external_torque_callback)
 
         self.trajectory_buffer = []
         self.last_joints = None
         self.dof = DOF
-        self.dmp = DMP(n_dims=DOF)
+        self.dmp = DMP(n_dims=DOF, dt=dt)
         self.dmp_goal = None
         self.dt = dt
+        self.last_record_time = rospy.Time(0)
 
         print("--- DMP Learner Initialized ---")
-        print("Commands: [s] Start Learning, [f] Finetune, [r] Rollout, [i] Idle, [q] Quit")
+        print("Commands: [s] Start Learning, [r] Rollout, [i] Idle, [q] Quit")
 
     def _keyboard_loop(self):
         """
@@ -72,9 +72,6 @@ class DMPLearner:
                     elif cmd == 'r':
                         self.state = "ROLLOUT"
                         print(f"--> Switched to: {self.state}")
-                    elif cmd == 'f':
-                        self.state = "FINETUNE"
-                        print(f"--> Switched to: {self.state}")
                     elif cmd == 'i':
                         self.state = "IDLE"
                         print(f"--> Switched to: {self.state}")
@@ -98,6 +95,8 @@ class DMPLearner:
             execution_time = (n_steps - 1) * self.dt
             T = np.linspace(0, execution_time, n_steps)
             self.dmp.imitate(T, np.array(self.trajectory_buffer))
+            # we need to specify how long it takes or it will execute trajectory in 1 second by default
+            self.dmp.set_execution_time_(execution_time)
             
             print("DMP training complete.")
             self.trajectory_buffer = []  # Clear the buffer after saving
@@ -113,7 +112,12 @@ class DMPLearner:
         self.last_jv = msg.velocity[:self.dof]
         if self.state == "LEARN" and self.learning_active:
             # Record the data for learning
-            self.trajectory_buffer.append(msg.position[:self.dof]) 
+            now = rospy.Time.now()
+            
+            # we want incoming traj to match what we send in terms of timesteps
+            if (now - self.last_record_time).to_sec() >= self.dt:
+                self.trajectory_buffer.append(msg.position[:self.dof])
+                self.last_record_time = now
 
     # def external_torque_callback(self, msg: GravityTorque):
     #     # TODO not sure we actually need this here at all for now tbh
@@ -124,6 +128,7 @@ class DMPLearner:
         Main Control Loop (Real-time, e.g. 500Hz)
         """
         rate = rospy.Rate(1/self.dt)
+        count = 0
         
         while not rospy.is_shutdown() and self.running:
             
@@ -135,17 +140,19 @@ class DMPLearner:
                 # Learning is handled in the callback and keyboard loop
                 pass 
             
-            elif self.state == "FINETUNE":
-                # have to send data as in rollout but also then
-                # read back the new positions
-                pass
-            
             elif self.state == "ROLLOUT":
                 # Execute the learned DMP
-                # self.dmp.configure()
-                if self.last_joints is not None:
+                if self.last_joints is not None and not (self.dmp.start_y == self.dmp.goal_y).all():
                     y, yd = self.dmp.step(self.last_joints, self.last_jv)
-                    self.udp.send_data(y, yd, np.zeros(self.dof))
+                    if (yd < 0.0001).all():
+                        self.state = "IDLE"
+                        print(f"reached end of DMP trajectory after {count} steps, entering IDLE.")
+                    else:
+                        print(count, y, yd)
+                        count += 1
+                        self.udp.send_data(y, np.zeros(self.dof), np.zeros(self.dof))
+                else:
+                    print("likely not trained a valid DMP yet")
 
             rate.sleep()
 
@@ -155,7 +162,7 @@ if __name__ == "__main__":
     rospy.init_node('dmp_learner')
     
     # Initialize
-    learner = DMPLearner(remote_ip="127.0.0.1", send_port=5556, DOF=4)
+    learner = DMPLearner(remote_ip="127.0.0.1", send_port=5556, DOF=7)
     
     # Start the main loop
     try:
