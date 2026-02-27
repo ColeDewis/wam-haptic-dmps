@@ -133,7 +133,7 @@ class DMPLearner:
             self.dmp.imitate(T, np.array(self.trajectory_buffer))
             # we need to specify how long it takes or it will execute trajectory in 1 second by default
             self.dmp.set_execution_time_(execution_time)
-            self.dmp_goal = self.trajectory_buffer[-1]
+            self.dmp_goal = np.array(self.trajectory_buffer[-1])
             
             print("DMP training complete.")
             self.trajectory_buffer = []  # Clear the buffer after saving
@@ -145,7 +145,7 @@ class DMPLearner:
         Callback for receiving WAM joint states. This is where you would
         typically record data during the LEARN phase or use it during ROLLOUT.
         """
-        self.last_joints = msg.position[:self.dof] 
+        self.last_joints = np.array(msg.position[:self.dof]) 
         self.last_jv = msg.velocity[:self.dof]
         if self.state in ("LEARN", "ROLLOUT") and self.learning_active:
             # Record the data for learning
