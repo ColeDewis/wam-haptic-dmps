@@ -2,11 +2,11 @@
 import sys
 import threading
 
+import numpy as np
 import rospy
 from movement_primitives.dmp import DMP
 from sensor_msgs.msg import JointState
 from wam_haptic_dmps.udp_handler import TeleopUDPHandler
-import numpy as np
 
 
 class DMPLearner:
@@ -65,8 +65,16 @@ class DMPLearner:
                 elif self.state == "ROLLOUT":
                     if cmd == "s":
                         self.learning_active = False
+                    elif cmd == "r":
+                        self.learning_active = True
+                    elif cmd == "q":
+                        self.learning_active = False
+                        self.dmp.reset()
+                        self.count = 0
+                        self.state = "FINISH"
+                        print("--> Rollout stopped. Transitioning to FINISH. Options: [save], [quit]")
+                        
                 elif self.state == "FINISH":
-                    print("Rollout done. Options: [save], [quit]")
                     if cmd == 'save':
                         self._save_trajectory()
                         self.state = "IDLE"
@@ -89,10 +97,20 @@ class DMPLearner:
                         self.state = "ROLLOUT"
                         self.learning_active = True
                         self.trajectory_buffer = []
-                        print(f"--> Switched to: {self.state}.")
+                        
+                        # configure the DMP to start from current position, keeping same end goal.
+                        self.dmp.configure(
+                            start_y=self.last_joints, 
+                            start_yd=np.zeros(self.dof), 
+                            start_ydd=np.zeros(self.dof), 
+                            goal_y=self.dmp_goal,
+                            goal_yd=np.zeros(self.dof),
+                            goal_ydd=np.zeros(self.dof)
+                        )
+                        print("--> Executing DMP rollout. Options: [s] to stop saving joints, [r] to resume saving, [q] to force stop rollout.")
                     elif cmd == 'i':
                         self.state = "IDLE"
-                        print(f"--> Switched to: {self.state}")
+                        print(f"--> Switched to: {self.state}. Commands: [s] Start Learning, [r] Rollout, [i] Idle, [q] Quit")
                     elif cmd == 'q':
                         self.state = "QUIT"
                         self.running = False
@@ -115,6 +133,7 @@ class DMPLearner:
             self.dmp.imitate(T, np.array(self.trajectory_buffer))
             # we need to specify how long it takes or it will execute trajectory in 1 second by default
             self.dmp.set_execution_time_(execution_time)
+            self.dmp_goal = self.trajectory_buffer[-1]
             
             print("DMP training complete.")
             self.trajectory_buffer = []  # Clear the buffer after saving
@@ -143,37 +162,34 @@ class DMPLearner:
 
     def run(self):
         """
-        Main Control Loop (Real-time, e.g. 500Hz)
+        Main Control Loop (Real-time, e.g. 500Hz). Handles executing the DMP
         """
         rate = rospy.Rate(1/self.dt)
         count = 0
         
         while not rospy.is_shutdown() and self.running:
             
-            # --- STATE MACHINE ---
-            if self.state == "IDLE":
-                pass
-                
-            elif self.state == "LEARN":
-                # Learning is handled in the callback and keyboard loop
-                pass 
-            
-            elif self.state == "ROLLOUT":
+            if self.state == "ROLLOUT":
                 # Execute the learned DMP
                 if self.last_joints is not None and not (self.dmp.start_y == self.dmp.goal_y).all():
                     y, yd = self.dmp.step(self.last_joints, self.last_jv)
+                    # TODO: hacky end condition. Count check is needed since initial movements are often 0.
                     if (yd < 0.001).all() and count > 300:
                         self.state = "FINISH"
                         self.learning_active = False
                         self.dmp.reset()
-                        print(f"reached end of DMP trajectory after {count} steps, entering FINISH.")
+                        print(f"--> Reached end of DMP trajectory after {count} steps, entering FINISH.")
+                        print("Rollout done. Options: [save], [quit]")
                         count = 0
                     else:
                         # print(count, y, yd)
                         count += 1
                         self.udp.send_data(y, np.zeros(self.dof), np.zeros(self.dof))
                 else:
-                    print("likely not trained a valid DMP yet")
+                    print("Likely have not trained a valid DMP yet")
+                    self.state = "IDLE"
+                    print(f"--> Switched to: {self.state}. Commands: [s] Start Learning, [r] Rollout, [i] Idle, [q] Quit")
+                    
 
             rate.sleep()
 
