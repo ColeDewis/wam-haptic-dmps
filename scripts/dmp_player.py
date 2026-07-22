@@ -1,0 +1,225 @@
+#!/usr/bin/env python3
+
+import numpy as np
+import rospy
+import os
+import signal
+import struct
+import time
+
+from pynput import keyboard
+from termcolor import cprint
+from movement_primitives.dmp import DMP
+from wam_haptic_dmps.udp_sender import UDPSender
+from wam_haptic_dmps.udp_receiver import UDPReceiver
+from wam_haptic_dmps.recorder import Recorder
+from wam_haptic_dmps.precise_sleep import precise_wait
+
+class DMPPlayer:
+    def __init__(self, episode_idx=0, remote_ip="127.0.0.1", send_port=6666, recv_port=6554, DOF=7, hz=10):
+        self.udp_receiver = UDPReceiver(
+            remote_ip, recv_port, DOF
+        )
+        self.udp_sender = UDPSender(
+            remote_ip, send_port, DOF=DOF
+        )
+
+        self.loop_state = "IDLE"
+        self.trajectory_buffer = []
+
+        self.dof = DOF
+        self.dt = 1/hz
+        self.dmp = DMP(n_dims=DOF+1, dt=self.dt, n_weights_per_dim=20)
+        self.dmp_goal = None
+
+        self.recorder = Recorder(save_dir="/home/user/wam_ros/wam_ws/src/wam_haptic_dmps/dataset")
+        self.trajectory_buffer = self.recorder.load_episode(episode_idx)
+
+        print("Training DMP with recorded trajectory...")
+        n_steps = len(self.trajectory_buffer)
+        execution_time = (n_steps - 1) * self.dt
+        T = np.linspace(0, execution_time, n_steps)
+        self.dmp.imitate(T, np.array(self.trajectory_buffer))
+        # we need to specify how long it takes or it will execute trajectory in 1 second by default
+        self.dmp.set_execution_time_(execution_time)
+        self.dmp_goal = np.array(self.trajectory_buffer[-1])
+        self.dmp_output = None
+        self.dmp_start_idx = 0
+        self.horizon = 8
+        
+        print("DMP training complete.")
+
+        # Set up Joystick
+        self.joy_fd = None
+        self._init_joystick()
+
+        self.kb_listener = keyboard.Listener(on_press=self._on_key_press)
+        self.kb_listener.start()
+        cprint("Initialization complete. Running teleop loop...", "green")
+        cprint("Controls: [R] Start/Stop", "cyan")
+
+    def _init_joystick(self):
+        """Initializes the joystick file descriptor in non-blocking mode."""
+        try:
+            self.joy_fd = os.open("/dev/input/js0", os.O_RDONLY | os.O_NONBLOCK)
+            cprint("[SYSTEM] Successfully opened joystick /dev/input/js0", "green")
+        except OSError:
+            cprint(
+                "[SYSTEM] Could not open joystick /dev/input/js0. Continuing without joystick.",
+                "yellow",
+            )
+
+    def _poll_joystick(self):
+        """Reads non-blocking events from the joystick."""
+        if self.joy_fd is None:
+            return
+
+        try:
+            while True:
+                event_data = os.read(self.joy_fd, 8)
+                if not event_data:
+                    break
+
+                time_msec, value, ev_type, number = struct.unpack("IhBB", event_data)
+
+                # Remove the init event flag (0x80)
+                ev_type &= ~0x80
+
+                # ev_type == 1 means button event, value == 1 means pressed (down)
+                if ev_type == 0x01 and value == 1:
+                    if number == 1:  # 'o' button
+                        self._handle_start_action()
+
+        except BlockingIOError:
+            pass
+        except Exception as e:
+            cprint(f"[SYSTEM] Error reading joystick: {e}", "red")
+
+    def _on_key_press(self, key):
+        """Asynchronous callback for keyboard events."""
+        try:
+            if hasattr(key, "char") and key.char is not None:
+                k = key.char.lower()
+
+                if k == "r":
+                    if self.loop_state == "IDLE" or self.loop_state == "ROLLOUT":
+                        self._handle_start_action()
+        except Exception:
+            pass
+
+    def _handle_start_action(self):
+        """Unified logic for 'r' / 's' on keyboard and 'o' on joystick."""
+        if self.loop_state == "IDLE":
+            self.loop_state = "ROLLOUT"
+            cprint("\n[RECORDER] 🔴 EPISODE STARTED", "red", attrs=["bold"])
+        elif self.loop_state == "ROLLOUT":
+            self.loop_state = "IDLE"
+            self.dmp_output = None
+            self.dmp_start_idx = 0
+            cprint("\n[RECORDER] ⏸ EPISODE PAUSED", "yellow")
+            cprint("Press [R] or 'o' to start", "cyan")
+
+
+    def shutdown(self):
+        cprint("Cleaning up streams and windows...", "red")
+        self.udp_sender.close()
+        self.udp_receiver.close()
+        if self.joy_fd is not None:
+            try:
+                os.close(self.joy_fd)
+            except Exception:
+                pass
+
+        os._exit(0)
+    
+    def _read_state(self):
+        state_dict = self.udp_receiver.receive_latest_data()
+        status = state_dict is not None
+
+        obs = {}
+        if status:
+            obs["y"] = np.array([*state_dict["follower_jp"], state_dict["gripper_pos"]])
+            obs["yd"] = np.array([*state_dict["follower_jv"], 0])
+        
+        return status, obs
+
+    def run(self):
+        try:
+            self.system_running = True
+
+            def force_shutdown(signum, frame):
+                cprint(
+                    "\n[SYSTEM] Ctrl+C detected! Forcing main loop shutdown...", "red"
+                )
+                self.system_running = False
+
+            signal.signal(signal.SIGINT, force_shutdown)
+
+            t_start = time.monotonic()
+            iter_idx = 0
+            while self.system_running:
+                t_cycle_end = t_start + (iter_idx + 1) * self.dt
+
+                self._poll_joystick()
+
+                # Read images
+                state_status, obs = self._read_state()
+
+                if not state_status:
+                    cprint("waiting for messages", "yellow")
+                else:
+                    # Infer + send to WAM
+                    if self.loop_state == "ROLLOUT":
+                        if self.dmp_output is None:
+                            # configure the DMP to start from current position, keeping same end goal.
+                            self.dmp.configure(
+                                start_y=obs["y"], 
+                                start_yd=obs["yd"], 
+                                goal_y=self.dmp_goal,
+                            )
+                            _, self.dmp_output = self.dmp.open_loop()
+
+                        dmp_end_idx = min(self.dmp_start_idx+self.horizon, len(self.dmp_output))
+
+                        action_chunk = self.dmp_output[self.dmp_start_idx:dmp_end_idx, :]
+
+                        if action_chunk.shape[0] < self.horizon:
+                            pad_count = self.horizon - action_chunk.shape[0]
+                            pad = np.tile(self.dmp_output[-1], (pad_count, 1))
+                            action_chunk = np.vstack([action_chunk, pad])
+
+                        print(action_chunk)
+                        print(self.dmp_start_idx)
+
+                        self.udp_sender.send_action_chunk(action_chunk)
+                        self.dmp_start_idx += self.horizon
+
+                        if dmp_end_idx == len(self.dmp_output):
+                            print("reached end of trajectory")
+                            self._handle_start_action()
+
+
+                precise_wait(t_cycle_end)
+                iter_idx += 1
+
+
+        except Exception as e:
+            import traceback
+
+            print("CRASHED WITH ERROR:")
+            traceback.print_exc()
+
+        finally:
+            self.shutdown()
+
+if __name__ == "__main__":
+    rospy.init_node('dmp_player')
+    
+    # Initialize
+    player = DMPPlayer(remote_ip="127.0.0.1", send_port=6666, recv_port=6554, DOF=7)
+    
+    # Start the main loop
+    try:
+        player.run()
+    except rospy.ROSInterruptException:
+        pass

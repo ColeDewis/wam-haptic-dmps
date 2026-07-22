@@ -160,7 +160,8 @@ include_directories(
 #   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 # )
 catkin_install_python(PROGRAMS
-  scripts/dmp.py
+  scripts/dmp_learner.py
+  scripts/dmp_player.py
   scripts/sine_j4.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
