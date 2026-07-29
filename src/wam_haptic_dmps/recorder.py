@@ -72,7 +72,10 @@ class Recorder:
             raise FileNotFoundError(f"Episode file not found: {filepath}")
 
         with h5py.File(filepath, "r") as f:
-            data = f["y"][:]  # shape (n_steps, dim)
+            follower_jp = f["follower_jp"][:]          # shape (n_steps, 7)
+            gripper_pos = f["gripper_pos"][:]           # shape (n_steps,)
+
+            data = np.concatenate([follower_jp, gripper_pos[:, None]], axis=1)
 
         trajectory_buffer = [np.array(step) for step in data]
         return trajectory_buffer

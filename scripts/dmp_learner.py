@@ -143,13 +143,8 @@ class DMPLearner:
     def _read_state(self):
         state_dict = self.udp_receiver.receive_latest_data()
         status = state_dict is not None
-
-        obs = {}
-        if status:
-            obs["y"] = np.array([*state_dict["follower_jp"], state_dict["gripper_pos"]])
-            obs["yd"] = np.array([*state_dict["follower_jv"], 0])
         
-        return status, obs
+        return status, state_dict
 
 
     def run(self):

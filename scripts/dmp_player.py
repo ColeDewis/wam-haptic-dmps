@@ -17,12 +17,17 @@ from wam_haptic_dmps.precise_sleep import precise_wait
 
 class DMPPlayer:
     def __init__(self, episode_idx=0, remote_ip="127.0.0.1", send_port=6666, recv_port=6554, DOF=7, hz=10):
+        self.horizon = 200 - 1 # -1 because we also send current state for better interpolation
+
         self.udp_receiver = UDPReceiver(
             remote_ip, recv_port, DOF
         )
         self.udp_sender = UDPSender(
-            remote_ip, send_port, DOF=DOF
+            remote_ip, send_port, DOF=DOF, horizon=self.horizon + 1
         )
+
+        self.send_interval = 0.1  # send interpolated points for 3 seconds
+        self.last_send_time = 0.0
 
         self.loop_state = "IDLE"
         self.trajectory_buffer = []
@@ -45,7 +50,6 @@ class DMPPlayer:
         self.dmp_goal = np.array(self.trajectory_buffer[-1])
         self.dmp_output = None
         self.dmp_start_idx = 0
-        self.horizon = 8
         
         print("DMP training complete.")
 
@@ -136,12 +140,7 @@ class DMPPlayer:
         state_dict = self.udp_receiver.receive_latest_data()
         status = state_dict is not None
 
-        obs = {}
-        if status:
-            obs["y"] = np.array([*state_dict["follower_jp"], state_dict["gripper_pos"]])
-            obs["yd"] = np.array([*state_dict["follower_jv"], 0])
-        
-        return status, obs
+        return status, state_dict
 
     def run(self):
         try:
@@ -173,30 +172,38 @@ class DMPPlayer:
                         if self.dmp_output is None:
                             # configure the DMP to start from current position, keeping same end goal.
                             self.dmp.configure(
-                                start_y=obs["y"], 
-                                start_yd=obs["yd"], 
+                                start_y=np.array([*obs["follower_jp"], obs["gripper_pos"]]), 
+                                start_yd=np.array([*obs["follower_jv"], obs["gripper_vel"]]), 
                                 goal_y=self.dmp_goal,
                             )
                             _, self.dmp_output = self.dmp.open_loop()
 
                         dmp_end_idx = min(self.dmp_start_idx+self.horizon, len(self.dmp_output))
 
-                        action_chunk = self.dmp_output[self.dmp_start_idx:dmp_end_idx, :]
+                        # action_chunk = self.dmp_output[self.dmp_start_idx:dmp_end_idx, :]
+                        current_state = np.array([*obs["follower_jp"], obs["gripper_pos"]])  # shape (8,)
+                        future_actions = self.dmp_output[self.dmp_start_idx:dmp_end_idx, :]   # shape (k, 8)
 
-                        if action_chunk.shape[0] < self.horizon:
-                            pad_count = self.horizon - action_chunk.shape[0]
+                        action_chunk = np.concatenate(([current_state], future_actions), axis=0)
+
+                        if action_chunk.shape[0] < self.horizon + 1:
+                            pad_count = self.horizon + 1 - action_chunk.shape[0]
                             pad = np.tile(self.dmp_output[-1], (pad_count, 1))
                             action_chunk = np.vstack([action_chunk, pad])
 
-                        print(action_chunk)
-                        print(self.dmp_start_idx)
 
-                        self.udp_sender.send_action_chunk(action_chunk)
-                        self.dmp_start_idx += self.horizon
+                        if (time.time() - self.last_send_time) >= self.send_interval:
+                            print(self.dmp_start_idx)
+                            print(action_chunk)
+                            print(action_chunk.shape)
 
-                        if dmp_end_idx == len(self.dmp_output):
-                            print("reached end of trajectory")
-                            self._handle_start_action()
+                            self.udp_sender.send_action_chunk(action_chunk)
+                            self.dmp_start_idx += self.horizon
+                            self.last_send_time = time.time()
+
+                            if dmp_end_idx == len(self.dmp_output):
+                                print("reached end of trajectory")
+                                self._handle_start_action()
 
 
                 precise_wait(t_cycle_end)
@@ -216,7 +223,7 @@ if __name__ == "__main__":
     rospy.init_node('dmp_player')
     
     # Initialize
-    player = DMPPlayer(remote_ip="127.0.0.1", send_port=6666, recv_port=6554, DOF=7)
+    player = DMPPlayer(episode_idx=0, remote_ip="127.0.0.1", send_port=6666, recv_port=6554, DOF=7)
     
     # Start the main loop
     try:
