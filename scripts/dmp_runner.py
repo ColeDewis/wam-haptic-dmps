@@ -10,11 +10,28 @@ import time
 from pynput import keyboard
 from termcolor import cprint
 from movement_primitives.dmp import DMP
+import cv2
 from wam_haptic_dmps.udp_sender import UDPSender
 from wam_haptic_dmps.udp_receiver import UDPReceiver
 from wam_haptic_dmps.recorder import Recorder
+from wam_haptic_dmps.multi_flir_manager import MultiFLIRManager
 from wam_haptic_dmps.precise_sleep import precise_wait
 
+def preprocess_image(
+    img_bgr: np.ndarray, crop_scale: float = 0.9, out_size=(224, 224)
+) -> np.ndarray:
+    """Center-crop by area 'crop_scale' and resize to out_size using OpenCV. Keeps image in BGR."""
+    H, W = img_bgr.shape[:2]
+    s = float(crop_scale) ** 0.5
+    crop_h, crop_w = int(round(H * s)), int(round(W * s))
+
+    y0 = max((H - crop_h) // 2, 0)
+    x0 = max((W - crop_w) // 2, 0)
+
+    img_cropped = img_bgr[y0 : y0 + crop_h, x0 : x0 + crop_w]
+    img_resized = cv2.resize(img_cropped, out_size, interpolation=cv2.INTER_AREA)
+
+    return img_resized
 
 class DMPRunner:
     """
@@ -25,17 +42,31 @@ class DMPRunner:
                                   (dmp_idx = episode_counter - 1), train the DMP on it
     """
 
-    def __init__(self, remote_ip="127.0.0.1", send_port=6666, recv_port=6554, DOF=7, hz=10):
-        self.horizon = 8  # we also send over the current state so on the receiving side we get +1 actions
+    def __init__(self, remote_ip="127.0.0.1", leader_send_port=10000, follower_send_port=20000, recv_port=6554, DOF=7, hz=10):
+        self.horizon = 200  # we also send over the current state so on the receiving side we get +1 actions
 
         self.udp_receiver = UDPReceiver(
             remote_ip, recv_port, DOF
         )
-        self.udp_sender = UDPSender(
-            remote_ip, send_port, DOF=DOF, horizon=self.horizon + 1
+        self.leader_udp_sender = UDPSender(
+            # remote_ip, send_port, DOF=DOF, horizon=self.horizon + 1
+            remote_ip, leader_send_port, DOF=DOF, horizon=self.horizon
+        )
+        self.follower_udp_sender = UDPSender(
+            # remote_ip, send_port, DOF=DOF, horizon=self.horizon + 1
+            remote_ip, follower_send_port, DOF=DOF, horizon=self.horizon
         )
 
-        self.send_interval = 0.1  # interval between sent action chunks
+        # FLIR setup
+        camera_configs = {
+            "wrist_image": "18475182",
+            "front_image": "18475176",
+        }
+        self.camera_manager = MultiFLIRManager(camera_configs)
+        self.camera_manager.start_all()
+
+
+        self.send_interval = 0.4  # interval between sent action chunks
         self.last_send_time = 0.0
 
         self.loop_state = "IDLE"  # "IDLE" | "RECORDING"
@@ -90,12 +121,22 @@ class DMPRunner:
                 # ev_type == 1 means button event, value == 1 means pressed (down)
                 if ev_type == 0x01 and value == 1:
                     if number == 1:  # 'o' button
+                        print("press o")
                         self._handle_start_recording()
                     elif number == 0:  # 'x' button
+                        print("press x")
                         self._handle_stop_and_save()
-                    elif number == 2:  # 'up' button
+                    elif number == 8:   # hat Y axis, up = negative — confirm exact axis# and sign from your log!
+                        print("press up")
                         self._handle_stop_and_save()
                         self._handle_select_dmp_demo()
+
+                # event_data = os.read(self.joy_fd, 8)
+                # if not event_data:
+                #     break
+                # time_msec, value, ev_type, number = struct.unpack("IhBB", event_data)
+                # ev_type &= ~0x80
+                # print(f"ev_type={ev_type} number={number} value={value}")  # <-- log everything
 
         except BlockingIOError:
             pass
@@ -166,15 +207,31 @@ class DMPRunner:
 
     def shutdown(self):
         cprint("Cleaning up streams and windows...", "red")
-        self.udp_sender.close()
+        self.leader_udp_sender.close()
+        self.follower_udp_sender.close()
         self.udp_receiver.close()
         if self.joy_fd is not None:
             try:
                 os.close(self.joy_fd)
             except Exception:
                 pass
+        self.camera_manager.stop_all()
 
         os._exit(0)
+
+    def _read_images(self):
+        status, raw_frames = self.camera_manager.read_all()
+        if not status:
+            return False, None
+
+        # TODO: we really shouldn't be doing this here, it would make more sense
+        # for the policy to preprocess itself.
+        processed_frames = {}
+        for name, img_bgr in raw_frames.items():
+            proc_img = preprocess_image(img_bgr)
+            processed_frames[name] = cv2.cvtColor(proc_img, cv2.COLOR_BGR2RGB)
+
+        return True, processed_frames
 
     def _read_state(self):
         state_dict = self.udp_receiver.receive_latest_data()
@@ -185,6 +242,7 @@ class DMPRunner:
     def _step_dmp_rollout(self, obs):
         """Runs the DMP rollout (if a demo is selected) and sends UDP action chunks while recording."""
         if self.dmp_output is None:
+            obs = obs["low_dim"]
             # configure the DMP to start from current position, keeping the same end goal.
             self.dmp.configure(
                 start_y=np.array([*obs["follower_jp"], obs["gripper_pos"]]),
@@ -203,15 +261,19 @@ class DMPRunner:
         current_state = np.array([*obs["follower_jp"], obs["gripper_pos"]])  # shape (8,)
         future_actions = self.dmp_output[self.dmp_start_idx:dmp_end_idx, :]  # shape (k, 8)
 
-        action_chunk = np.concatenate(([current_state], future_actions), axis=0)
+        # action_chunk = np.concatenate(([current_state], future_actions), axis=0)
+        action_chunk = future_actions
 
-        if action_chunk.shape[0] < self.horizon + 1:
-            pad_count = self.horizon + 1 - action_chunk.shape[0]
+        # if action_chunk.shape[0] < self.horizon + 1:
+        if action_chunk.shape[0] < self.horizon:
+            # pad_count = self.horizon + 1 - action_chunk.shape[0]
+            pad_count = self.horizon - action_chunk.shape[0]
             pad = np.tile(action_chunk[-1], (pad_count, 1))
             action_chunk = np.vstack([action_chunk, pad])
 
         if (time.time() - self.last_send_time) >= self.send_interval:
-            self.udp_sender.send_action_chunk(action_chunk)
+            self.leader_udp_sender.send_action_chunk(action_chunk)
+            self.follower_udp_sender.send_action_chunk(action_chunk)
             self.dmp_start_idx += self.horizon
             self.last_send_time = time.time()
 
@@ -237,10 +299,18 @@ class DMPRunner:
 
                 self._poll_joystick()
 
-                state_status, obs = self._read_state()
+                img_status, image_dict = self._read_images()
+                state_status, state_dict = self._read_state()
+
+                obs = image_dict.copy()
+                obs["low_dim"] = state_dict
 
                 if not state_status:
-                    cprint("waiting for messages", "yellow")
+                    if iter_idx % 10 == 0:
+                        cprint("waiting for wam messages", "yellow")
+                elif not img_status:
+                    if iter_idx % 10 == 0:
+                        cprint("waiting for image messages", "yellow")
                 else:
                     if self.loop_state == "RECORDING":
                         self.recorder.add_step(obs)
@@ -265,7 +335,7 @@ class DMPRunner:
 if __name__ == "__main__":
     rospy.init_node('dmp_runner')
 
-    runner = DMPRunner(remote_ip="127.0.0.1", send_port=6666, recv_port=6554, DOF=7)
+    runner = DMPRunner(remote_ip="127.0.0.1", leader_send_port=10000, follower_send_port=20000, recv_port=6554, DOF=7)
 
     try:
         runner.run()

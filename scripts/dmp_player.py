@@ -16,17 +16,20 @@ from wam_haptic_dmps.recorder import Recorder
 from wam_haptic_dmps.precise_sleep import precise_wait
 
 class DMPPlayer:
-    def __init__(self, episode_idx=0, remote_ip="127.0.0.1", send_port=6666, recv_port=6554, DOF=7, hz=10):
-        self.horizon = 8 # we also send over the current state so on the reciving side we get +1 actions
+    def __init__(self, episode_idx=0, remote_ip="127.0.0.1", leader_send_port=10000, follower_send_port=20000, recv_port=6554, DOF=7, hz=10):
+        self.horizon = 200
 
         self.udp_receiver = UDPReceiver(
             remote_ip, recv_port, DOF
         )
-        self.udp_sender = UDPSender(
-            remote_ip, send_port, DOF=DOF, horizon=self.horizon + 1
+        self.leader_udp_sender = UDPSender(
+            remote_ip, leader_send_port, DOF=DOF, horizon=self.horizon
+        )
+        self.follower_udp_sender = UDPSender(
+            remote_ip, follower_send_port, DOF=DOF, horizon=self.horizon
         )
 
-        self.send_interval = 0.1  # send interpolated points for 3 seconds
+        self.send_interval = 0.4  # send interpolated points for 3 seconds
         self.last_send_time = 0.0
 
         self.loop_state = "IDLE"
@@ -126,7 +129,8 @@ class DMPPlayer:
 
     def shutdown(self):
         cprint("Cleaning up streams and windows...", "red")
-        self.udp_sender.close()
+        self.follower_udp_sender.close()
+        self.leader_udp_sender.close()
         self.udp_receiver.close()
         if self.joy_fd is not None:
             try:
@@ -184,10 +188,11 @@ class DMPPlayer:
                         current_state = np.array([*obs["follower_jp"], obs["gripper_pos"]])  # shape (8,)
                         future_actions = self.dmp_output[self.dmp_start_idx:dmp_end_idx, :]   # shape (k, 8)
 
-                        action_chunk = np.concatenate(([current_state], future_actions), axis=0)
+                        # action_chunk = np.concatenate(([current_state], future_actions), axis=0)
+                        action_chunk = future_actions
 
-                        if action_chunk.shape[0] < self.horizon + 1:
-                            pad_count = self.horizon + 1 - action_chunk.shape[0]
+                        if action_chunk.shape[0] < self.horizon:
+                            pad_count = self.horizon - action_chunk.shape[0]
                             pad = np.tile(action_chunk[-1], (pad_count, 1))
                             action_chunk = np.vstack([action_chunk, pad])
 
@@ -197,7 +202,8 @@ class DMPPlayer:
                             print(action_chunk)
                             print(action_chunk.shape)
 
-                            self.udp_sender.send_action_chunk(action_chunk)
+                            self.leader_udp_sender.send_action_chunk(action_chunk)
+                            self.follower_udp_sender.send_action_chunk(action_chunk)
                             self.dmp_start_idx += self.horizon
                             self.last_send_time = time.time()
 
@@ -223,7 +229,7 @@ if __name__ == "__main__":
     rospy.init_node('dmp_player')
     
     # Initialize
-    player = DMPPlayer(episode_idx=0, remote_ip="127.0.0.1", send_port=6666, recv_port=6554, DOF=7)
+    player = DMPPlayer(episode_idx=0, remote_ip="127.0.0.1", leader_send_port=10000, follower_send_port=20000, recv_port=6554, DOF=7)
     
     # Start the main loop
     try:

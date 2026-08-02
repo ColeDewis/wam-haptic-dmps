@@ -11,10 +11,10 @@ class UDPReceiver:
         self.dof = dof
         self.recv_port = recv_port
 
-        # 6 DOF-length arrays + follower(cart_pos 3 + quat 4) + leader(cart_pos 3 + quat 4)
+        # 7 DOF-length arrays + follower(cart_pos 3 + quat 4) + leader(cart_pos 3 + quat 4)
         # + gripper_pos + gripper_vel + gripper_torque
         # 'Q'  = uint64_t (timestamp)
-        num_doubles = (6 * self.dof) + 17
+        num_doubles = (7 * self.dof) + 17
         self.fmt = f"<{num_doubles}dQ"
         self.packet_size = struct.calcsize(self.fmt)
 
@@ -68,14 +68,15 @@ class UDPReceiver:
         idx_leader_jp = dof * 3
         idx_leader_jv = dof * 4
         idx_leader_ext_tau = dof * 5
-        idx_follower_cart_pos = dof * 6
-        idx_follower_quat = dof * 6 + 3
-        idx_leader_cart_pos = dof * 6 + 7
-        idx_leader_quat = dof * 6 + 10
-        idx_gripper_pos = dof * 6 + 14
-        idx_gripper_vel = dof * 6 + 15
-        idx_gripper_torque = dof * 6 + 16
-        idx_timestamp = dof * 6 + 17
+        idx_policy_torque_scale = dof * 6
+        idx_follower_cart_pos = dof * 7
+        idx_follower_quat = dof * 7 + 3
+        idx_leader_cart_pos = dof * 7 + 7
+        idx_leader_quat = dof * 7 + 10
+        idx_gripper_pos = dof * 7 + 14
+        idx_gripper_vel = dof * 7 + 15
+        idx_gripper_torque = dof * 7 + 16
+        idx_timestamp = dof * 7 + 17
  
         return {
             "follower_jp": list(unpacked[idx_follower_jp:idx_follower_jv]),
@@ -83,7 +84,8 @@ class UDPReceiver:
             "follower_ext_torque": list(unpacked[idx_follower_ext_tau:idx_leader_jp]),
             "leader_jp": list(unpacked[idx_leader_jp:idx_leader_jv]),
             "leader_jv": list(unpacked[idx_leader_jv:idx_leader_ext_tau]),
-            "leader_ext_torque": list(unpacked[idx_leader_ext_tau:idx_follower_cart_pos]),
+            "leader_ext_torque": list(unpacked[idx_leader_ext_tau:idx_policy_torque_scale]),
+            "policy_torque_scale": list(unpacked[idx_policy_torque_scale:idx_follower_cart_pos]),
             "follower_cart_pos": list(unpacked[idx_follower_cart_pos:idx_follower_quat]),
             "follower_quat_wxyz": list(unpacked[idx_follower_quat:idx_leader_cart_pos]),
             "leader_cart_pos": list(unpacked[idx_leader_cart_pos:idx_leader_quat]),

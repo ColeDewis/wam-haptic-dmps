@@ -33,6 +33,7 @@ class Recorder:
         else:
             # Base case: it's a list of arrays/numbers, so save as dataset
             data = np.array(data_list)
+            print(f"SAVING episode key: {key} of size {data.shape}")
             h5_group.create_dataset(key, data=data, compression="gzip")
 
     def get_next_episode_index(self):
@@ -74,8 +75,8 @@ class Recorder:
         if not os.path.exists(filepath):
             raise FileNotFoundError(f"Episode file not found: {filepath}")
         with h5py.File(filepath, "r") as f:
-            follower_jp = f["follower_jp"][:]          # shape (n_steps, 7)
-            gripper_pos = f["gripper_pos"][:]           # shape (n_steps,)
+            follower_jp = f["low_dim"]["follower_jp"][:]          # shape (n_steps, 7)
+            gripper_pos = f["low_dim"]["gripper_pos"][:]           # shape (n_steps,)
             data = np.concatenate([follower_jp, gripper_pos[:, None]], axis=1)
         trajectory_buffer = [np.array(step) for step in data]
         return trajectory_buffer
