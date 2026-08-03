@@ -11,7 +11,7 @@ class UDPReceiver:
         self.dof = dof
         self.recv_port = recv_port
 
-        # 7 DOF-length arrays + follower(cart_pos 3 + quat 4) + leader(cart_pos 3 + quat 4)
+       # 7 DOF-length arrays + follower(cart_pos 3 + quat 4) + leader(cart_pos 3 + quat 4)
         # + gripper_pos + gripper_vel + gripper_torque
         # 'Q'  = uint64_t (timestamp)
         num_doubles = (7 * self.dof) + 17

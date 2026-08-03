@@ -17,7 +17,7 @@ from wam_haptic_dmps.precise_sleep import precise_wait
 
 class DMPPlayer:
     def __init__(self, episode_idx=0, remote_ip="127.0.0.1", leader_send_port=10000, follower_send_port=20000, recv_port=6554, DOF=7, hz=10):
-        self.horizon = 200
+        self.horizon = 8
 
         self.udp_receiver = UDPReceiver(
             remote_ip, recv_port, DOF
@@ -201,6 +201,7 @@ class DMPPlayer:
                             print(self.dmp_start_idx)
                             print(action_chunk)
                             print(action_chunk.shape)
+                            print(dmp_end_idx)
 
                             self.leader_udp_sender.send_action_chunk(action_chunk)
                             self.follower_udp_sender.send_action_chunk(action_chunk)
