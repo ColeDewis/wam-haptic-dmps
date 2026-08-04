@@ -32,6 +32,9 @@ class DMPPlayer:
         self.send_interval = 0.4  # send interpolated points for 3 seconds
         self.last_send_time = 0.0
 
+        self.inference_time = 1.0          # estimate of how long inf takes
+        self.inference_time_alpha = 0.2    # EMA smoothing factor for the estimate
+
         self.loop_state = "IDLE"
         self.trajectory_buffer = []
 
@@ -176,42 +179,48 @@ class DMPPlayer:
                         if self.dmp_output is None:
                             # configure the DMP to start from current position, keeping same end goal.
                             self.dmp.configure(
-                                start_y=np.array([*obs["follower_jp"], obs["gripper_pos"]]), 
-                                start_yd=np.array([*obs["follower_jv"], obs["gripper_vel"]]), 
+                                start_y=np.array([*obs["follower_jp"], obs["gripper_pos"]]),
+                                start_yd=np.array([*obs["follower_jv"], obs["gripper_vel"]]),
                                 goal_y=self.dmp_goal,
                             )
                             _, self.dmp_output = self.dmp.open_loop()
 
-                        dmp_end_idx = min(self.dmp_start_idx+self.horizon, len(self.dmp_output))
+                        time_to_chunk_end_s = obs["time_to_chunk_end_ns"] / 1e9
+                        interval_elapsed = (time.time() - self.last_send_time) >= self.send_interval
 
-                        # action_chunk = self.dmp_output[self.dmp_start_idx:dmp_end_idx, :]
-                        current_state = np.array([*obs["follower_jp"], obs["gripper_pos"]])  # shape (8,)
-                        future_actions = self.dmp_output[self.dmp_start_idx:dmp_end_idx, :]   # shape (k, 8)
+                        should_infer = (time_to_chunk_end_s <= self.inference_time) and interval_elapsed
 
-                        # action_chunk = np.concatenate(([current_state], future_actions), axis=0)
-                        action_chunk = future_actions
+                        if should_infer:
+                            t_infer_start = time.monotonic()
 
-                        if action_chunk.shape[0] < self.horizon:
-                            pad_count = self.horizon - action_chunk.shape[0]
-                            pad = np.tile(action_chunk[-1], (pad_count, 1))
-                            action_chunk = np.vstack([action_chunk, pad])
+                            dmp_end_idx = min(self.dmp_start_idx + self.horizon, len(self.dmp_output))
+                            action_chunk = self.dmp_output[self.dmp_start_idx:dmp_end_idx, :]
 
+                            if action_chunk.shape[0] < self.horizon:
+                                pad_count = self.horizon - action_chunk.shape[0]
+                                pad = np.tile(action_chunk[-1], (pad_count, 1))
+                                action_chunk = np.vstack([action_chunk, pad])
 
-                        if (time.time() - self.last_send_time) >= self.send_interval:
+                            elapsed = time.monotonic() - t_infer_start
+                            self.inference_time = (
+                                self.inference_time_alpha * elapsed
+                                + (1 - self.inference_time_alpha) * self.inference_time
+                            )
+
                             print(self.dmp_start_idx)
                             print(action_chunk)
                             print(action_chunk.shape)
                             print(dmp_end_idx)
 
-                            self.leader_udp_sender.send_action_chunk(action_chunk)
-                            self.follower_udp_sender.send_action_chunk(action_chunk)
+                            time_to_skip_ns = obs["time_to_chunk_end_ns"]
+                            self.leader_udp_sender.send_action_chunk(action_chunk, time_to_skip_ns)
+                            self.follower_udp_sender.send_action_chunk(action_chunk, time_to_skip_ns)
                             self.dmp_start_idx += self.horizon
                             self.last_send_time = time.time()
 
                             if dmp_end_idx == len(self.dmp_output):
                                 print("reached end of trajectory")
                                 self._handle_start_action()
-
 
                 precise_wait(t_cycle_end)
                 iter_idx += 1

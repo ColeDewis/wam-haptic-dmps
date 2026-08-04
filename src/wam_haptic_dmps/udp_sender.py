@@ -35,7 +35,7 @@ class UDPSender:
         print(f"UDP [inference send]: {remote_ip}:{send_port}.")
 
 
-    def send_action_chunk(self, actions):
+    def send_action_chunk(self, actions, time_to_skip_ns):
         """
         Sends a chunk of actions to the remote target in one packet.
         """
@@ -46,8 +46,7 @@ class UDPSender:
                 f"got {actions.shape}"
             )
 
-        now_ns = time.time_ns()
-        header = struct.pack(self.header_fmt, now_ns)
+        header = struct.pack(self.header_fmt, time_to_skip_ns)
         payload = header + actions.tobytes()
 
         try:

@@ -13,10 +13,11 @@ class UDPReceiver:
 
         # 7 DOF-length arrays + follower(cart_pos 3 + quat 4) + leader(cart_pos 3 + quat 4)
         # + gripper_pos + gripper_vel + gripper_torque
+        # 'Q'  = time_to_chunk_end (ns)
         # 'Q'  = uint64_t (timestamp)
-        # bytes: 536
+        # bytes: 544
         num_doubles = (7 * self.dof) + 17
-        self.fmt = f"<{num_doubles}dQ"
+        self.fmt = f"<{num_doubles}dQQ"
         self.packet_size = struct.calcsize(self.fmt)
 
         # Receiver Socket
@@ -77,7 +78,8 @@ class UDPReceiver:
         idx_gripper_pos = dof * 7 + 14
         idx_gripper_vel = dof * 7 + 15
         idx_gripper_torque = dof * 7 + 16
-        idx_timestamp = dof * 7 + 17
+        idx_time_to_chunk_end = dof * 7 + 17
+        idx_timestamp = dof * 7 + 18
  
         return {
             "follower_jp": list(unpacked[idx_follower_jp:idx_follower_jv]),
@@ -94,6 +96,7 @@ class UDPReceiver:
             "gripper_pos": unpacked[idx_gripper_pos],
             "gripper_vel": unpacked[idx_gripper_vel],
             "gripper_torque": unpacked[idx_gripper_torque],
+            "time_to_chunk_end_ns": unpacked[idx_time_to_chunk_end],
             "timestamp_ns": unpacked[idx_timestamp],
         }
 
