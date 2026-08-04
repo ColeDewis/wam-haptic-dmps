@@ -99,6 +99,9 @@ class DMPPlayer:
                 if ev_type == 0x01 and value == 1:
                     if number == 1:  # 'o' button
                         self._handle_start_action()
+                    elif number == 0:  # 'x' button
+                        print("press x")
+                        self._handle_stop()
 
         except BlockingIOError:
             pass
@@ -112,8 +115,9 @@ class DMPPlayer:
                 k = key.char.lower()
 
                 if k == "r":
-                    if self.loop_state == "IDLE" or self.loop_state == "ROLLOUT":
-                        self._handle_start_action()
+                    self._handle_start_action()
+                elif k == "d":
+                    self._handle_stop()
         except Exception:
             pass
 
@@ -121,13 +125,19 @@ class DMPPlayer:
         """Unified logic for 'r' / 's' on keyboard and 'o' on joystick."""
         if self.loop_state == "IDLE":
             self.loop_state = "ROLLOUT"
+            self.dmp_output = None
+            self.dmp_start_idx = 0
+            self.last_send_time = 0.0
             cprint("\n[RECORDER] 🔴 EPISODE STARTED", "red", attrs=["bold"])
-        elif self.loop_state == "ROLLOUT":
+
+    def _handle_stop(self):
+        """'d' on keyboard / 'x' on joystick: stop any action sending."""
+        if self.loop_state == "ROLLOUT":
             self.loop_state = "IDLE"
             self.dmp_output = None
             self.dmp_start_idx = 0
-            cprint("\n[RECORDER] ⏸ EPISODE PAUSED", "yellow")
-            cprint("Press [R] or 'o' to start", "cyan")
+
+            cprint("Press [R] or 'o' to start recording", "cyan")
 
 
     def shutdown(self):
