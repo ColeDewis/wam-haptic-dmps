@@ -21,6 +21,7 @@ class UDPSender:
         
         # jp (DOF doubles) + jv (DOF doubles) + ext_torque (DOF doubles) +
         # meas_torque (DOF doubles) + gripper (1 double) + timestamp (uint64_t)
+        # bytes: 520
         self.header_fmt = "<Q"
         self.packet_size = struct.calcsize(self.header_fmt) + (
             self.horizon * self.action_size * 8
