@@ -121,7 +121,6 @@ class DMPRunner:
                 # Remove the init event flag (0x80)
                 ev_type &= ~0x80
 
-                # ev_type == 1 means button event, value == 1 means pressed (down)
                 if ev_type == 0x01 and value == 1:
                     # BLUETOOTHCTL connection
                     # if number == 1:  # 'o' button
