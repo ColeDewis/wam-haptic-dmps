@@ -97,9 +97,17 @@ class DMPPlayer:
 
                 # ev_type == 1 means button event, value == 1 means pressed (down)
                 if ev_type == 0x01 and value == 1:
+                    # BLUETOOTHCTL connection
                     if number == 1:  # 'o' button
                         self._handle_start_action()
                     elif number == 0:  # 'x' button
+                        print("press x")
+                        self._handle_stop()
+                    # SIXAXIS connection
+                    if number == 13:  # 'o' button
+                        print("press o")
+                        self._handle_start_action()
+                    elif number == 14:  # 'x' button
                         print("press x")
                         self._handle_stop()
 

@@ -70,9 +70,17 @@ class DMPLearner:
 
                 # ev_type == 1 means button event, value == 1 means pressed (down)
                 if ev_type == 0x01 and value == 1:
-                    if number == 1:  # 'o' button
+                    # BLUETOOTHCTL connection
+                    # if number == 1:  # 'o' button
+                    #     self._handle_start_save_action()
+                    # elif number == 0:  # 'x' button
+                    #     self._handle_discard_action()
+                    # SIXAXIS connection
+                    if number == 13:  # 'o' button
+                        print("press o")
                         self._handle_start_save_action()
-                    elif number == 0:  # 'x' button
+                    elif number == 14:  # 'x' button
+                        print("press x")
                         self._handle_discard_action()
 
         except BlockingIOError:

@@ -123,13 +123,25 @@ class DMPRunner:
 
                 # ev_type == 1 means button event, value == 1 means pressed (down)
                 if ev_type == 0x01 and value == 1:
-                    if number == 1:  # 'o' button
+                    # BLUETOOTHCTL connection
+                    # if number == 1:  # 'o' button
+                    #     print("press o")
+                    #     self._handle_start_recording()
+                    # elif number == 0:  # 'x' button
+                    #     print("press x")
+                    #     self._handle_stop_and_save()
+                    # elif number == 8:   # hat Y axis, up = negative — confirm exact axis# and sign from your log!
+                    #     print("press up")
+                    #     self._handle_stop_and_save()
+                    #     self._handle_select_dmp_demo()
+                    # SIXAXIS connection
+                    if number == 13:  # 'o' button
                         print("press o")
                         self._handle_start_recording()
-                    elif number == 0:  # 'x' button
+                    elif number == 14:  # 'x' button
                         print("press x")
                         self._handle_stop_and_save()
-                    elif number == 8:   # hat Y axis, up = negative — confirm exact axis# and sign from your log!
+                    elif number == 4:   # hat Y axis, up = negative — confirm exact axis# and sign from your log!
                         print("press up")
                         self._handle_stop_and_save()
                         self._handle_select_dmp_demo()
@@ -296,12 +308,12 @@ class DMPRunner:
                 obs = image_dict.copy()
                 obs["low_dim"] = state_dict
 
-                if not state_status:
-                    if iter_idx % 10 == 0:
-                        cprint("waiting for wam messages", "yellow")
-                elif not img_status:
+                if not img_status:
                     if iter_idx % 10 == 0:
                         cprint("waiting for image messages", "yellow")
+                elif not state_status:
+                    if iter_idx % 10 == 0:
+                        cprint("waiting for wam messages", "yellow")
                 else:
                     if self.loop_state == "RECORDING":
                         self.recorder.add_step(obs)
