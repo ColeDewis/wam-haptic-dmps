@@ -238,7 +238,7 @@ class DMPPlayer:
 
                             if dmp_end_idx == len(self.dmp_output):
                                 print("reached end of trajectory")
-                                self._handle_start_action()
+                                self._handle_stop()
 
                 precise_wait(t_cycle_end)
                 iter_idx += 1

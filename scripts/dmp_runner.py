@@ -43,7 +43,7 @@ class DMPRunner:
     """
 
     def __init__(self, remote_ip="127.0.0.1", leader_send_port=10000, follower_send_port=20000, recv_port=6554, DOF=7, hz=10):
-        self.horizon = 200  # we also send over the current state so on the receiving side we get +1 actions
+        self.horizon = 8  # we also send over the current state so on the receiving side we get +1 actions
 
         self.udp_receiver = UDPReceiver(
             remote_ip, recv_port, DOF
@@ -249,7 +249,6 @@ class DMPRunner:
     def _step_dmp_rollout(self, obs):
         """Runs the DMP rollout (if a demo is selected) and sends UDP action chunks while recording."""
         if self.dmp_output is None:
-            obs = obs["low_dim"]
             # configure the DMP to start from current position, keeping the same end goal.
             self.dmp.configure(
                 start_y=np.array([*obs["follower_jp"], obs["gripper_pos"]]),
@@ -274,6 +273,11 @@ class DMPRunner:
 
         if (time.time() - self.last_send_time) >= self.send_interval:
             time_to_skip_ns = obs["time_to_chunk_end_ns"]
+
+            print(self.dmp_start_idx)
+            print(action_chunk)
+            print(action_chunk.shape)
+            print(dmp_end_idx)
 
             self.leader_udp_sender.send_action_chunk(action_chunk, time_to_skip_ns)
             self.follower_udp_sender.send_action_chunk(action_chunk, time_to_skip_ns)
@@ -317,6 +321,7 @@ class DMPRunner:
                     if self.loop_state == "RECORDING":
                         self.recorder.add_step(obs)
 
+                        obs = obs["low_dim"]
                         time_to_chunk_end_s = obs["time_to_chunk_end_ns"] / 1e9
                         interval_elapsed = (time.time() - self.last_send_time) >= self.send_interval
 

@@ -15,8 +15,8 @@ class UDPReceiver:
         # + gripper_pos + gripper_vel + gripper_torque
         # 'Q'  = time_to_chunk_end (ns)
         # 'Q'  = uint64_t (timestamp)
-        # bytes: 562
-        num_doubles = (8 * self.dof) + 18
+        # bytes: 600        
+        num_doubles = (8 * self.dof) + 17
         self.fmt = f"<{num_doubles}dQQ"
         self.packet_size = struct.calcsize(self.fmt)
 
