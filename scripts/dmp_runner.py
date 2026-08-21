@@ -240,12 +240,6 @@ class DMPRunner:
 
         return True, processed_frames
 
-    def _read_state(self):
-        state_dict = self.udp_receiver.receive_latest_data()
-        status = state_dict is not None
-
-        return status, state_dict
-
     def _handle_new_frames(self, new_frames):
         for name, (img_bgr, ts_ns) in new_frames.items():
             proc = preprocess_image(img_bgr)
@@ -311,19 +305,17 @@ class DMPRunner:
 
                 self._poll_joystick()
 
-                state_status, state_dict = self._read_state()
+                new_states = self.udp_receiver.receive_all_new()
                 new_frames = self.camera_manager.read_all() # non blocking
 
-                if not state_status:
-                    if iter_idx % 10 == 0:
-                        cprint("waiting for wam messages", "yellow")
-                else:
-                    if self.loop_state == "RECORDING":
+                if self.loop_state == "RECORDING":
+                    for state_dict in new_states:
                         self.recorder.add_low_dim_step(state_dict)
-                        if new_frames:
-                            self._handle_new_frames(new_frames)
+                    if new_frames:
+                        self._handle_new_frames(new_frames)
 
-                        time_to_chunk_end_s = state_dict["time_to_chunk_end_ns"] / 1e9
+                    if len(new_states) > 0:
+                        time_to_chunk_end_s = new_states[-1]["time_to_chunk_end_ns"] / 1e9
                         interval_elapsed = (time.time() - self.last_send_time) >= self.send_interval
 
                         should_infer = (time_to_chunk_end_s <= self.inference_time) and interval_elapsed
@@ -333,7 +325,7 @@ class DMPRunner:
 
                             # Only send UDP actions if a DMP demo has actually been selected.
                             if self.dmp_idx is not None:
-                                self._step_dmp_rollout(state_dict)
+                                self._step_dmp_rollout(new_states[-1])
                                 
                             elapsed = time.monotonic() - t_infer_start
                             self.inference_time = (
@@ -358,6 +350,10 @@ class DMPRunner:
 
 
 if __name__ == "__main__":
+    import multiprocessing
+    multiprocessing.set_start_method("spawn", force=True)
+
+
     rospy.init_node('dmp_runner')
 
     runner = DMPRunner(remote_ip="127.0.0.1", leader_send_port=10000, follower_send_port=20000, recv_port=6554, DOF=7, hz=500)

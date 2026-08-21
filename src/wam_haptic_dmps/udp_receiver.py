@@ -1,5 +1,7 @@
 import socket
 import struct
+import threading
+import queue
 
 
 class UDPReceiver:
@@ -39,35 +41,47 @@ class UDPReceiver:
             print(f"Error binding to port {self.recv_port}: {e}")
             self.sock_recv = None
 
-    def receive_latest_data(self):
-        """
-        Drains the OS UDP buffer and returns ONLY the most recent packet.
-        This ensures Python doesn't fall behind the high-frequency C++ control loop.
-        """
-        if not self.sock_recv:
-            return None
+        self.sock_recv.setblocking(True)
+        self.sock_recv.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 1 << 20)
+        self.q = queue.Queue(maxsize=100)
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._recv_loop, daemon=True)
+        self._thread.start()
 
-        latest_data = None
 
-        while True:
+    def _recv_loop(self):
+        while not self._stop.is_set():
             try:
                 data, _ = self.sock_recv.recvfrom(1024)
-                if len(data) == self.packet_size:
-                    latest_data = data
-                else:
-                    print(f"⚠️ Dropping packet! Expected {self.packet_size} bytes, got {len(data)} bytes.")
-            except BlockingIOError:
-                break  # Buffer is empty
-            except Exception as e:
-                print(f"Receive Error: {e}")
+            except OSError:
                 break
+            if len(data) == self.packet_size:
+                try:
+                    self.q.put_nowait(data)
+                except queue.Full:
+                    self.q.get_nowait()
+                    self.q.put_nowait(data)
+            else:
+                print(f"⚠️ Dropping packet! Expected {self.packet_size} bytes, got {len(data)} bytes.")
+                    
+    def receive_all_new(self):
+        """Returns every packet since the last call, unpacked, in order."""
+        packets = []
+        while True:
+            try:
+                data = self.q.get_nowait()
+            except queue.Empty:
+                break
+            packets.append(self._unpack(data))
+        return packets
 
+    def _unpack(self, data):
         # If we didn't get any valid data this loop, return None
-        if latest_data is None:
+        if data is None:
             return None
 
         # Unpack the freshest packet
-        unpacked = struct.unpack(self.fmt, latest_data)
+        unpacked = struct.unpack(self.fmt, data)
 
         dof = self.dof
 
