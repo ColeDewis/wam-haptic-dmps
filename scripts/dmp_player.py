@@ -257,7 +257,7 @@ if __name__ == "__main__":
     rospy.init_node('dmp_player')
     
     # Initialize
-    player = DMPPlayer(episode_idx=0, remote_ip="127.0.0.1", leader_send_port=10000, follower_send_port=20000, recv_port=6554, DOF=7)
+    player = DMPPlayer(episode_idx=0, remote_ip="127.0.0.1", leader_send_port=10000, follower_send_port=20000, recv_port=6554, DOF=7, hz=500)
     
     # Start the main loop
     try:

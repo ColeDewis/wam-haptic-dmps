@@ -246,6 +246,12 @@ class DMPRunner:
 
         return status, state_dict
 
+    def _handle_new_frames(self, new_frames):
+        for name, (img_bgr, ts_ns) in new_frames.items():
+            proc = preprocess_image(img_bgr)
+            proc = cv2.cvtColor(proc, cv2.COLOR_BGR2RGB)
+            self.recorder.add_image_step(name, proc, ts_ns)
+
     def _step_dmp_rollout(self, obs):
         """Runs the DMP rollout (if a demo is selected) and sends UDP action chunks while recording."""
         if self.dmp_output is None:
@@ -305,24 +311,19 @@ class DMPRunner:
 
                 self._poll_joystick()
 
-                img_status, image_dict = self._read_images()
                 state_status, state_dict = self._read_state()
+                new_frames = self.camera_manager.read_all() # non blocking
 
-                obs = image_dict.copy()
-                obs["low_dim"] = state_dict
-
-                if not img_status:
-                    if iter_idx % 10 == 0:
-                        cprint("waiting for image messages", "yellow")
-                elif not state_status:
+                if not state_status:
                     if iter_idx % 10 == 0:
                         cprint("waiting for wam messages", "yellow")
                 else:
                     if self.loop_state == "RECORDING":
-                        self.recorder.add_step(obs)
+                        self.recorder.add_low_dim_step(state_dict)
+                        if new_frames:
+                            self._handle_new_frames(new_frames)
 
-                        obs = obs["low_dim"]
-                        time_to_chunk_end_s = obs["time_to_chunk_end_ns"] / 1e9
+                        time_to_chunk_end_s = state_dict["time_to_chunk_end_ns"] / 1e9
                         interval_elapsed = (time.time() - self.last_send_time) >= self.send_interval
 
                         should_infer = (time_to_chunk_end_s <= self.inference_time) and interval_elapsed
@@ -332,7 +333,7 @@ class DMPRunner:
 
                             # Only send UDP actions if a DMP demo has actually been selected.
                             if self.dmp_idx is not None:
-                                self._step_dmp_rollout(obs)
+                                self._step_dmp_rollout(state_dict)
                                 
                             elapsed = time.monotonic() - t_infer_start
                             self.inference_time = (
@@ -359,7 +360,7 @@ class DMPRunner:
 if __name__ == "__main__":
     rospy.init_node('dmp_runner')
 
-    runner = DMPRunner(remote_ip="127.0.0.1", leader_send_port=10000, follower_send_port=20000, recv_port=6554, DOF=7)
+    runner = DMPRunner(remote_ip="127.0.0.1", leader_send_port=10000, follower_send_port=20000, recv_port=6554, DOF=7, hz=500)
 
     try:
         runner.run()

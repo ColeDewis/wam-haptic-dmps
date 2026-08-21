@@ -182,7 +182,7 @@ class DMPLearner:
                 else:
                     # Recording
                     if self.loop_state == "RECORDING":
-                        self.recorder.add_step(obs)
+                        self.recorder.add_low_dim_step(obs)
 
                 precise_wait(t_cycle_end)
                 iter_idx += 1
@@ -201,7 +201,7 @@ if __name__ == "__main__":
     rospy.init_node('dmp_learner')
     
     # Initialize
-    learner = DMPLearner(remote_ip="127.0.0.1", recv_port=6554, DOF=7)
+    learner = DMPLearner(remote_ip="127.0.0.1", recv_port=6554, DOF=7, hz=500)
     
     try:
         learner.run()

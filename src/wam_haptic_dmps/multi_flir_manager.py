@@ -20,8 +20,10 @@ class MultiFLIRManager:
         self.harvester.update_device_info_list()
 
         self.streams = {}
+        self.last_ids = {}
         for name, serial in camera_configs.items():
             self.streams[name] = FLIRStream(self.harvester, serial)
+            self.last_ids[name] = 0
 
     def start_all(self):
         cprint("Starting all FLIR streams...", "green")
@@ -36,14 +38,13 @@ class MultiFLIRManager:
         Returns (True, {"wrist": img1, "front": img2}) if all succeeded.
         Returns (False, None) if ANY camera dropped a frame.
         """
-        frames = {}
+        new_frames = {}
         for name, stream in self.streams.items():
-            img = stream.read()
-            if img is None:
-                return False, None
-            frames[name] = img
-
-        return True, frames
+            img, new_id, ts_ns = stream.read(self.last_ids[name])
+            if img is not None:
+                self.last_ids[name] = new_id
+                new_frames[name] = (img, ts_ns)
+        return new_frames
 
     def stop_all(self):
         cprint("Shutting down FLIR streams...", "red")
