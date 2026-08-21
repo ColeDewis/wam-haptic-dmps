@@ -76,7 +76,7 @@ class DMPRunner:
 
         self.dof = DOF
         self.dt = 1 / hz
-        self.dmp = DMP(n_dims=DOF + 1, dt=self.dt, n_weights_per_dim=20)
+        self.dmp = DMP(n_dims=DOF + 1, dt=0.1, n_weights_per_dim=20)
         self.dmp_goal = None
         self.dmp_output = None
         self.dmp_start_idx = 0
