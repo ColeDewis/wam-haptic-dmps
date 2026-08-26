@@ -2,6 +2,7 @@ import socket
 import struct
 import threading
 import queue
+import time
 
 
 class UDPReceiver:
@@ -22,11 +23,10 @@ class UDPReceiver:
         # + follower(cart_pos 3 + quat 4) + leader(cart_pos 3 + quat 4)
         # + gripper_pos + gripper_vel + gripper_torque
         # 'Q'  = time_to_chunk_end (ns)
-        # 'Q'  = uint64_t (timestamp)
-        # bytes: 880        
+        # bytes: 872        
 
         num_doubles = (13 * self.dof) + 17
-        self.fmt = f"<{num_doubles}dQQ"
+        self.fmt = f"<{num_doubles}dQ"
         self.packet_size = struct.calcsize(self.fmt)
 
         # Receiver Socket
@@ -47,7 +47,6 @@ class UDPReceiver:
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._recv_loop, daemon=True)
         self._thread.start()
-
 
     def _recv_loop(self):
         while not self._stop.is_set():
@@ -106,7 +105,6 @@ class UDPReceiver:
         idx_gripper_vel = dof * 13 + 15
         idx_gripper_torque = dof * 13 + 16
         idx_time_to_chunk_end = dof * 13 + 17
-        idx_timestamp = dof * 13 + 18
  
         return {
             "follower_jp": list(unpacked[idx_follower_jp:idx_follower_jv]),
@@ -130,7 +128,7 @@ class UDPReceiver:
             "gripper_vel": unpacked[idx_gripper_vel],
             "gripper_torque": unpacked[idx_gripper_torque],
             "time_to_chunk_end_ns": unpacked[idx_time_to_chunk_end],
-            "timestamp_ns": unpacked[idx_timestamp],
+            "timestamp_ns": time.time_ns(), # C++ clock is not compatible with the way we should be using timestamps
         }
 
 

@@ -59,8 +59,8 @@ class DMPRunner:
 
         # FLIR setup
         camera_configs = {
-            "wrist_image": "18475182",
-            "front_image": "18475176",
+            "wrist_image": {"serial": "18475182", "exposure_time": 10000, "gain": 10},
+            "front_image": {"serial": "18475176", "exposure_time": 10000, "gain": 10},
         }
         self.camera_manager = MultiFLIRManager(camera_configs)
         self.camera_manager.start_all()
@@ -140,10 +140,13 @@ class DMPRunner:
                     elif number == 14:  # 'x' button
                         print("press x")
                         self._handle_stop_and_save()
-                    elif number == 4:   # hat Y axis, up = negative — confirm exact axis# and sign from your log!
+                    elif number == 4:
                         print("press up")
                         self._handle_stop_and_save()
                         self._handle_select_dmp_demo()
+                    elif number == 6:   # down button
+                        print("press down")
+                        self._handle_stop()
 
         except BlockingIOError:
             pass
@@ -194,6 +197,16 @@ class DMPRunner:
             cprint(f"\n[RUNNER] \U0001F4BE Saved {ep_name}. Ready for next episode.", "green")
             cprint("Press [R] or 'o' to start recording, [S] or 'up' to pick a DMP demo.", "cyan")
 
+    def _handle_stop(self):
+        """'down' on joystick: stop recording, stop any action sending."""
+        if self.loop_state == "RECORDING":
+            self.loop_state = "IDLE"
+            self.dmp_output = None
+            self.dmp_start_idx = 0
+
+            cprint(f"\n[RUNNER] \U0001F4BE Stopped ep", "green")
+            cprint("Press [R] or 'o' to start recording", "cyan")
+
     def _handle_select_dmp_demo(self):
         """'s' on keyboard / 'up' on joystick: use the just-saved episode as the DMP demo."""
         selected_idx = self.episode_counter - 1
@@ -225,20 +238,6 @@ class DMPRunner:
         self.camera_manager.stop_all()
 
         os._exit(0)
-
-    def _read_images(self):
-        status, raw_frames = self.camera_manager.read_all()
-        if not status:
-            return False, None
-
-        # TODO: we really shouldn't be doing this here, it would make more sense
-        # for the policy to preprocess itself.
-        processed_frames = {}
-        for name, img_bgr in raw_frames.items():
-            proc_img = preprocess_image(img_bgr)
-            processed_frames[name] = cv2.cvtColor(proc_img, cv2.COLOR_BGR2RGB)
-
-        return True, processed_frames
 
     def _handle_new_frames(self, new_frames):
         for name, (img_bgr, ts_ns) in new_frames.items():
