@@ -54,6 +54,10 @@ def _configure_camera(device, serial, camera_settings, error_queue):
             nm.GainAuto.value = 'Off'
             nm.Gain.value = float(gain)
 
+        if fps is not None:
+            nm.AcquisitionFrameRateEnable.value = True
+            nm.AcquisitionFrameRate = float(fps)
+
         if white_balance is None:
             nm.BalanceWhiteAuto.value = 'Continuous'
         else:

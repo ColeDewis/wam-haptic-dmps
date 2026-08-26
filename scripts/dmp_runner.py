@@ -15,10 +15,12 @@ from wam_haptic_dmps.udp_sender import UDPSender
 from wam_haptic_dmps.udp_receiver import UDPReceiver
 from wam_haptic_dmps.recorder import Recorder
 from wam_haptic_dmps.multi_flir_manager import MultiFLIRManager
+from wam_haptic_dmps.camera_viewer import CameraViewer
 from wam_haptic_dmps.precise_sleep import precise_wait
 
+# default 0.9 240, 240
 def preprocess_image(
-    img_bgr: np.ndarray, crop_scale: float = 0.9, out_size=(224, 224)
+    img_bgr: np.ndarray, crop_scale: float = 1.0, out_size=(300, 480)
 ) -> np.ndarray:
     """Center-crop by area 'crop_scale' and resize to out_size using OpenCV. Keeps image in BGR."""
     H, W = img_bgr.shape[:2]
@@ -59,12 +61,14 @@ class DMPRunner:
 
         # FLIR setup
         camera_configs = {
-            "wrist_image": {"serial": "18475182", "exposure_time": 10000, "gain": 10},
-            "front_image": {"serial": "18475176", "exposure_time": 10000, "gain": 10},
+                "wrist_image": {"serial": "18475182", "exposure_time": 12000, "gain": 8, "fps": 45},
+                "front_image": {"serial": "18475176", "exposure_time": 7000, "gain": 8, "fps": 45},
         }
         self.camera_manager = MultiFLIRManager(camera_configs)
         self.camera_manager.start_all()
 
+        self.camera_viewer = CameraViewer(self.camera_manager, display_fps=30)
+        self.camera_viewer.start()
 
         self.send_interval = 0.4  # interval between sent action chunks
         self.last_send_time = 0.0
