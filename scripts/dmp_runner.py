@@ -51,11 +51,9 @@ class DMPRunner:
             remote_ip, recv_port, DOF
         )
         self.leader_udp_sender = UDPSender(
-            # remote_ip, send_port, DOF=DOF, horizon=self.horizon + 1
             remote_ip, leader_send_port, DOF=DOF, horizon=self.horizon
         )
         self.follower_udp_sender = UDPSender(
-            # remote_ip, send_port, DOF=DOF, horizon=self.horizon + 1
             remote_ip, follower_send_port, DOF=DOF, horizon=self.horizon
         )
 
