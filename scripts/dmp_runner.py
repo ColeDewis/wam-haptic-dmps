@@ -68,10 +68,11 @@ class DMPRunner:
         self.camera_viewer = CameraViewer(self.camera_manager, display_fps=30)
         self.camera_viewer.start()
 
-        self.send_interval = 0.4  # interval between sent action chunks
+        self.send_interval = 0.05  # interval between sent action chunks
         self.last_send_time = 0.0
+        self.inf_buffer = 0.2 # little buffer to account for extra latencies like communication
 
-        self.inference_time = 1.0          # estimate of how long inf takes
+        self.inference_time = 0.001          # estimate of how long inf takes
         self.inference_time_alpha = 0.2    # EMA smoothing factor for the estimate
 
         self.loop_state = "IDLE"  # "IDLE" | "RECORDING"
@@ -273,7 +274,7 @@ class DMPRunner:
             action_chunk = np.vstack([action_chunk, pad])
 
         if (time.time() - self.last_send_time) >= self.send_interval:
-            time_to_skip_ns = obs["time_to_chunk_end_ns"]
+            time_to_skip_ns = obs["time_to_chunk_end_ns"] + int(self.inf_buffer * 1e9)
 
             print(self.dmp_start_idx)
             print(action_chunk)
@@ -319,7 +320,7 @@ class DMPRunner:
                         time_to_chunk_end_s = new_states[-1]["time_to_chunk_end_ns"] / 1e9
                         interval_elapsed = (time.time() - self.last_send_time) >= self.send_interval
 
-                        should_infer = (time_to_chunk_end_s <= self.inference_time) and interval_elapsed
+                        should_infer = (time_to_chunk_end_s <= self.inference_time + self.inf_buffer) and interval_elapsed
 
                         if should_infer:
                             t_infer_start = time.monotonic()
@@ -333,7 +334,7 @@ class DMPRunner:
                                 self.inference_time_alpha * elapsed
                                 + (1 - self.inference_time_alpha) * self.inference_time
                             )
-                            print(f"inf time {self.inference_time}")
+                            print(f"inf time {elapsed}. ttce {time_to_chunk_end_s}")
 
                             self.last_send_time = time.time()
 

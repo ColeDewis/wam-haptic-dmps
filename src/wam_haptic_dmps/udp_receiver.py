@@ -23,10 +23,11 @@ class UDPReceiver:
         # + follower(cart_pos 3 + quat 4) + leader(cart_pos 3 + quat 4)
         # + gripper_pos + gripper_vel + gripper_torque
         # 'Q'  = time_to_chunk_end (ns)
-        # bytes: 872        
+        # 'Q'  = res_time_to_chunk_end (ns)
+        # bytes: 880
 
         num_doubles = (13 * self.dof) + 17
-        self.fmt = f"<{num_doubles}dQ"
+        self.fmt = f"<{num_doubles}dQQ"
         self.packet_size = struct.calcsize(self.fmt)
 
         # Receiver Socket
@@ -52,14 +53,15 @@ class UDPReceiver:
         while not self._stop.is_set():
             try:
                 data, _ = self.sock_recv.recvfrom(1024)
+                recv_ts_ns = time.time_ns()   # capture immediately on arrival
             except OSError:
                 break
             if len(data) == self.packet_size:
                 try:
-                    self.q.put_nowait(data)
+                    self.q.put_nowait((data, recv_ts_ns))
                 except queue.Full:
                     self.q.get_nowait()
-                    self.q.put_nowait(data)
+                    self.q.put_nowait((data, recv_ts_ns))
             else:
                 print(f"⚠️ Dropping packet! Expected {self.packet_size} bytes, got {len(data)} bytes.")
                     
@@ -68,13 +70,13 @@ class UDPReceiver:
         packets = []
         while True:
             try:
-                data = self.q.get_nowait()
+                data, recv_ts_ns = self.q.get_nowait()
             except queue.Empty:
                 break
-            packets.append(self._unpack(data))
+            packets.append(self._unpack(data, recv_ts_ns))
         return packets
 
-    def _unpack(self, data):
+    def _unpack(self, data, recv_ts_ns):
         # If we didn't get any valid data this loop, return None
         if data is None:
             return None
@@ -105,7 +107,8 @@ class UDPReceiver:
         idx_gripper_vel = dof * 13 + 15
         idx_gripper_torque = dof * 13 + 16
         idx_time_to_chunk_end = dof * 13 + 17
- 
+        idx_res_time_to_chunk_end = dof * 13 + 18
+
         return {
             "follower_jp": list(unpacked[idx_follower_jp:idx_follower_jv]),
             "follower_jv": list(unpacked[idx_follower_jv:idx_follower_dyngravcomp_torque]),
@@ -128,9 +131,9 @@ class UDPReceiver:
             "gripper_vel": unpacked[idx_gripper_vel],
             "gripper_torque": unpacked[idx_gripper_torque],
             "time_to_chunk_end_ns": unpacked[idx_time_to_chunk_end],
-            "timestamp_ns": time.time_ns(), # C++ clock is not compatible with the way we should be using timestamps
+            "res_time_to_chunk_end_ns": unpacked[idx_res_time_to_chunk_end],
+            "timestamp_ns": recv_ts_ns, # C++ clock is not compatible with the way we should be using timestamps
         }
-
 
 
     def close(self):
