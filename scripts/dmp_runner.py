@@ -20,7 +20,7 @@ from wam_haptic_dmps.precise_sleep import precise_wait
 
 # default 0.9 240, 240
 def preprocess_image(
-    img_bgr: np.ndarray, crop_scale: float = 1.0, out_size=(300, 480)
+    img_bgr: np.ndarray, crop_scale: float = 1.0, out_size=(224, 224)
 ) -> np.ndarray:
     """Center-crop by area 'crop_scale' and resize to out_size using OpenCV. Keeps image in BGR."""
     H, W = img_bgr.shape[:2]
@@ -70,7 +70,7 @@ class DMPRunner:
 
         self.send_interval = 0.05  # interval between sent action chunks
         self.last_send_time = 0.0
-        self.inf_buffer = 0.2 # little buffer to account for extra latencies like communication
+        self.inf_buffer = 0.02 # little buffer to account for extra latencies like communication
 
         self.inference_time = 0.001          # estimate of how long inf takes
         self.inference_time_alpha = 0.2    # EMA smoothing factor for the estimate
