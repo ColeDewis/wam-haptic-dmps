@@ -44,7 +44,7 @@ class DMPRunner:
                                   (dmp_idx = episode_counter - 1), train the DMP on it
     """
 
-    def __init__(self, remote_ip="127.0.0.1", leader_send_port=10000, follower_send_port=20000, recv_port=6554, DOF=7, hz=10):
+    def __init__(self, remote_ip="127.0.0.1", leader_send_port=10000, follower_send_port=20000, recv_port=6554, DOF=7, hz=10, use_camera=False):
         self.horizon = 8  # we also send over the current state so on the receiving side we get +1 actions
 
         self.udp_receiver = UDPReceiver(
@@ -57,16 +57,19 @@ class DMPRunner:
             remote_ip, follower_send_port, DOF=DOF, horizon=self.horizon
         )
 
+        self.use_camera = use_camera
+
         # FLIR setup
         camera_configs = {
                 "wrist_image": {"serial": "18475182", "exposure_time": 12000, "gain": 8, "fps": 45},
                 "front_image": {"serial": "18475176", "exposure_time": 7000, "gain": 8, "fps": 45},
         }
-        self.camera_manager = MultiFLIRManager(camera_configs)
-        self.camera_manager.start_all()
+        if self.use_camera:
+            self.camera_manager = MultiFLIRManager(camera_configs)
+            self.camera_manager.start_all()
 
-        self.camera_viewer = CameraViewer(self.camera_manager, display_fps=30)
-        self.camera_viewer.start()
+            self.camera_viewer = CameraViewer(self.camera_manager, display_fps=30)
+            self.camera_viewer.start()
 
         self.send_interval = 0.05  # interval between sent action chunks
         self.last_send_time = 0.0
@@ -238,7 +241,8 @@ class DMPRunner:
                 os.close(self.joy_fd)
             except Exception:
                 pass
-        self.camera_manager.stop_all()
+        if self.use_camera:
+            self.camera_manager.stop_all()
 
         os._exit(0)
 
@@ -308,7 +312,7 @@ class DMPRunner:
                 self._poll_joystick()
 
                 new_states = self.udp_receiver.receive_all_new()
-                new_frames = self.camera_manager.read_all() # non blocking
+                new_frames = self.camera_manager.read_all() if self.use_camera else None # non blocking
 
                 if self.loop_state == "RECORDING":
                     for state_dict in new_states:
@@ -358,7 +362,7 @@ if __name__ == "__main__":
 
     rospy.init_node('dmp_runner')
 
-    runner = DMPRunner(remote_ip="127.0.0.1", leader_send_port=10000, follower_send_port=20000, recv_port=6554, DOF=7, hz=500)
+    runner = DMPRunner(remote_ip="127.0.0.1", leader_send_port=10000, follower_send_port=20000, recv_port=6554, DOF=7, hz=500, use_camera=False)
 
     try:
         runner.run()

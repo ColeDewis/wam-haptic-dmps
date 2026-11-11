@@ -58,8 +58,8 @@ class Recorder:
         return max_idx + 1
 
     def save_episode(self, episode_name):
-        if not self.low_dim_data or not self.image_data:
-            print("one or both of low_dim / image is missing, not saving.")
+        if not self.low_dim_data and not self.image_data:
+            print("one of low_dim / image is missing, not saving.")
             return
 
         filepath = os.path.join(self.save_dir, f"{episode_name}.hdf5")
