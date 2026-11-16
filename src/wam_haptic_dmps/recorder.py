@@ -85,7 +85,7 @@ class Recorder:
         print(f"[RECORDER] Saved {episode_name} to {filepath}")
         self.clear()
 
-    def load_episode(self, episode_idx):
+    def load_episode(self, episode_idx, use_gripper=True):
         """Loads episode_{episode_idx}.hdf5 and returns the trajectory buffer. """
         if episode_idx is None:
             return []
@@ -94,8 +94,11 @@ class Recorder:
         if not os.path.exists(filepath):
             raise FileNotFoundError(f"Episode file not found: {filepath}")
         with h5py.File(filepath, "r") as f:
-            follower_jp = f["low_dim"]["follower_jp"][:]          # shape (n_steps, 7)
-            gripper_pos = f["low_dim"]["gripper_pos"][:]           # shape (n_steps,)
-            data = np.concatenate([follower_jp, gripper_pos[:, None]], axis=1)
+            follower_jp = f["low_dim"]["follower_jp"][:]
+            if use_gripper:
+                gripper_pos = f["low_dim"]["gripper_pos"][:]
+                data = np.concatenate([follower_jp, gripper_pos[:, None]], axis=1)
+            else:
+                data = follower_jp
         trajectory_buffer = [np.array(step) for step in data]
         return trajectory_buffer

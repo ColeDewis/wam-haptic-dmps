@@ -44,20 +44,21 @@ class DMPRunner:
                                   (dmp_idx = episode_counter - 1), train the DMP on it
     """
 
-    def __init__(self, remote_ip="127.0.0.1", leader_send_port=10000, follower_send_port=20000, recv_port=6554, DOF=7, hz=10, use_camera=False):
+    def __init__(self, remote_ip="127.0.0.1", leader_send_port=10000, follower_send_port=20000, recv_port=6554, DOF=7, hz=10, use_camera=True, use_gripper=True):
         self.horizon = 8  # we also send over the current state so on the receiving side we get +1 actions
 
         self.udp_receiver = UDPReceiver(
             remote_ip, recv_port, DOF
         )
         self.leader_udp_sender = UDPSender(
-            remote_ip, leader_send_port, DOF=DOF, horizon=self.horizon
+            remote_ip, leader_send_port, DOF=DOF, horizon=self.horizon, use_gripper=use_gripper
         )
         self.follower_udp_sender = UDPSender(
-            remote_ip, follower_send_port, DOF=DOF, horizon=self.horizon
+            remote_ip, follower_send_port, DOF=DOF, horizon=self.horizon, use_gripper=use_gripper
         )
 
         self.use_camera = use_camera
+        self.use_gripper = use_gripper
 
         # FLIR setup
         camera_configs = {
@@ -82,7 +83,7 @@ class DMPRunner:
 
         self.dof = DOF
         self.dt = 1 / hz
-        self.dmp = DMP(n_dims=DOF + 1, dt=0.1, n_weights_per_dim=20)
+        self.dmp = DMP(n_dims=DOF + int(use_gripper), dt=0.1, n_weights_per_dim=20)
         self.dmp_goal = None
         self.dmp_output = None
         self.dmp_start_idx = 0
@@ -139,6 +140,10 @@ class DMPRunner:
                     #     print("press up")
                     #     self._handle_stop_and_save()
                     #     self._handle_select_dmp_demo()
+                    # elif number == 9:   # down button
+                    #     print("press down")
+                    #     self._handle_stop()
+
                     # SIXAXIS connection
                     if number == 13:  # 'o' button
                         print("press o")
@@ -216,7 +221,7 @@ class DMPRunner:
     def _handle_select_dmp_demo(self):
         """'s' on keyboard / 'up' on joystick: use the just-saved episode as the DMP demo."""
         selected_idx = self.episode_counter - 1
-        trajectory_buffer = self.recorder.load_episode(selected_idx)
+        trajectory_buffer = self.recorder.load_episode(selected_idx, use_gripper=self.use_gripper)
 
         cprint(f"[RUNNER] Training DMP on episode_{selected_idx}...", "cyan")
         n_steps = len(trajectory_buffer)
@@ -255,10 +260,16 @@ class DMPRunner:
     def _step_dmp_rollout(self, obs):
         """Runs the DMP rollout (if a demo is selected) and sends UDP action chunks while recording."""
         if self.dmp_output is None:
+            start_y = list(obs["follower_jp"])
+            start_yd = list(obs["follower_jv"])
+            if self.use_gripper:
+                start_y.append(obs["gripper_pos"])
+                start_yd.append(obs["gripper_vel"])
+
             # configure the DMP to start from current position, keeping the same end goal.
             self.dmp.configure(
-                start_y=np.array([*obs["follower_jp"], obs["gripper_pos"]]),
-                start_yd=np.array([*obs["follower_jv"], obs["gripper_vel"]]),
+                start_y=np.array(start_y),
+                start_yd=np.array(start_yd),
                 goal_y=self.dmp_goal,
             )
             _, self.dmp_output = self.dmp.open_loop()
@@ -362,7 +373,7 @@ if __name__ == "__main__":
 
     rospy.init_node('dmp_runner')
 
-    runner = DMPRunner(remote_ip="127.0.0.1", leader_send_port=10000, follower_send_port=20000, recv_port=6554, DOF=7, hz=500, use_camera=False)
+    runner = DMPRunner(remote_ip="127.0.0.1", leader_send_port=10000, follower_send_port=20000, recv_port=6554, DOF=7, hz=500, use_camera=False, use_gripper=False)
 
     try:
         runner.run()
