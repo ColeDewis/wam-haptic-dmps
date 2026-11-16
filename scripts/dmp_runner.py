@@ -83,7 +83,7 @@ class DMPRunner:
 
         self.dof = DOF
         self.dt = 1 / hz
-        self.dmp = DMP(n_dims=DOF + int(use_gripper), dt=0.1, n_weights_per_dim=20)
+        self.dmp = DMP(n_dims=DOF + int(use_gripper), dt=self.dt, n_weights_per_dim=20)
         self.dmp_goal = None
         self.dmp_output = None
         self.dmp_start_idx = 0
@@ -130,34 +130,34 @@ class DMPRunner:
 
                 if ev_type == 0x01 and value == 1:
                     # BLUETOOTHCTL connection
-                    # if number == 1:  # 'o' button
-                    #     print("press o")
-                    #     self._handle_start_recording()
-                    # elif number == 0:  # 'x' button
-                    #     print("press x")
-                    #     self._handle_stop_and_save()
-                    # elif number == 8:   # hat Y axis, up = negative — confirm exact axis# and sign from your log!
-                    #     print("press up")
-                    #     self._handle_stop_and_save()
-                    #     self._handle_select_dmp_demo()
-                    # elif number == 9:   # down button
-                    #     print("press down")
-                    #     self._handle_stop()
-
-                    # SIXAXIS connection
-                    if number == 13:  # 'o' button
+                    if number == 1:  # 'o' button
                         print("press o")
                         self._handle_start_recording()
-                    elif number == 14:  # 'x' button
+                    elif number == 0:  # 'x' button
                         print("press x")
                         self._handle_stop_and_save()
-                    elif number == 4:
+                    elif number == 8:   # hat Y axis, up = negative — confirm exact axis# and sign from your log!
                         print("press up")
                         self._handle_stop_and_save()
                         self._handle_select_dmp_demo()
-                    elif number == 6:   # down button
+                    elif number == 9:   # down button
                         print("press down")
                         self._handle_stop()
+
+                    # SIXAXIS connection
+                    # if number == 13:  # 'o' button
+                    #     print("press o")
+                    #     self._handle_start_recording()
+                    # elif number == 14:  # 'x' button
+                    #     print("press x")
+                    #     self._handle_stop_and_save()
+                    # elif number == 4:
+                    #     print("press up")
+                    #     self._handle_stop_and_save()
+                    #     self._handle_select_dmp_demo()
+                    # elif number == 6:   # down button
+                    #     print("press down")
+                    #     self._handle_stop()
 
         except BlockingIOError:
             pass
@@ -373,7 +373,7 @@ if __name__ == "__main__":
 
     rospy.init_node('dmp_runner')
 
-    runner = DMPRunner(remote_ip="127.0.0.1", leader_send_port=10000, follower_send_port=20000, recv_port=6554, DOF=7, hz=500, use_camera=False, use_gripper=False)
+    runner = DMPRunner(remote_ip="127.0.0.1", leader_send_port=10000, follower_send_port=20000, recv_port=6554, DOF=7, hz=10, use_camera=False, use_gripper=False)
 
     try:
         runner.run()
