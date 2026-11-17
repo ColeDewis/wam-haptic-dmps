@@ -38,9 +38,9 @@ def preprocess_image(
 class DMPRunner:
     """
     Controls:
-      [R] / joystick button 1 -> Start recording a new episode
-      [D] / joystick button 0 -> Stop recording, SAVE the episode, bump episode_counter
-      [S] / joystick button 2 -> Select the just-saved episode as the DMP demo
+      joystick button 1 -> Start recording a new episode
+      joystick button 0 -> Stop recording, SAVE the episode, bump episode_counter
+      joystick button 2 -> Select the just-saved episode as the DMP demo
                                   (dmp_idx = episode_counter - 1), train the DMP on it
     """
 
@@ -96,10 +96,8 @@ class DMPRunner:
         self.joy_fd = None
         self._init_joystick()
 
-        self.kb_listener = keyboard.Listener(on_press=self._on_key_press)
-        self.kb_listener.start()
         cprint("Initialization complete. Running teleop loop...", "green")
-        cprint("Controls: [R]/o Start recording | [D]/x Stop+Save | [S]/up Select DMP demo", "cyan")
+        cprint("Controls: o Start recording | x Stop+Save | up Select DMP demo", "cyan")
 
     def _init_joystick(self):
         """Initializes the joystick file descriptor in non-blocking mode."""
@@ -163,22 +161,6 @@ class DMPRunner:
             pass
         except Exception as e:
             cprint(f"[SYSTEM] Error reading joystick: {e}", "red")
-
-    def _on_key_press(self, key):
-        """Asynchronous callback for keyboard events."""
-        try:
-            if hasattr(key, "char") and key.char is not None:
-                k = key.char.lower()
-
-                if k == "r":
-                    self._handle_start_recording()
-                elif k == "d":
-                    self._handle_stop_and_save()
-                elif k == "s":
-                    self._handle_stop_and_save()
-                    self._handle_select_dmp_demo()
-        except Exception:
-            pass
 
     def _handle_start_recording(self):
         """'r' on keyboard / 'o' on joystick: begin recording a new episode."""
