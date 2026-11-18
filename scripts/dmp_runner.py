@@ -74,7 +74,7 @@ class DMPRunner:
 
         self.send_interval = 0.05  # interval between sent action chunks
         self.last_send_time = 0.0
-        self.inf_buffer = 0.02 # little buffer to account for extra latencies like communication
+        self.inf_buffer = 0.1 # little buffer to account for extra latencies like communication
 
         self.inference_time = 0.001          # estimate of how long inf takes
         self.inference_time_alpha = 0.2    # EMA smoothing factor for the estimate
@@ -205,10 +205,15 @@ class DMPRunner:
         selected_idx = self.episode_counter - 1
         trajectory_buffer = self.recorder.load_episode(selected_idx, use_gripper=self.use_gripper)
 
+        traj = np.array(trajectory_buffer)
+        stride = int(round(500 * self.dt)) # select at 10hz the trajectory that was saved at 500
+        idx = np.arange(0, len(traj), stride)
+        trajectory_buffer = traj[idx]
+
         cprint(f"[RUNNER] Training DMP on episode_{selected_idx}...", "cyan")
         n_steps = len(trajectory_buffer)
         execution_time = (n_steps - 1) * self.dt
-        T = np.linspace(0, execution_time, n_steps)
+        T = np.linspace(0, execution_time, n_steps) 
         self.dmp.imitate(T, np.array(trajectory_buffer))
         self.dmp.set_execution_time_(execution_time)
         self.dmp_goal = np.array(trajectory_buffer[-1])
@@ -270,20 +275,20 @@ class DMPRunner:
             pad = np.tile(action_chunk[-1], (pad_count, 1))
             action_chunk = np.vstack([action_chunk, pad])
 
-        if (time.time() - self.last_send_time) >= self.send_interval:
-            time_to_skip_ns = obs["time_to_chunk_end_ns"] + int(self.inf_buffer * 1e9)
+        time_to_skip_ns = obs["time_to_chunk_end_ns"] + int(self.inf_buffer * 1e9)
 
-            print(self.dmp_start_idx)
-            print(action_chunk)
-            print(action_chunk.shape)
-            print(dmp_end_idx)
+        print(self.dmp_start_idx)
+        print(action_chunk)
+        print(action_chunk.shape)
+        print(dmp_end_idx)
+        print(time_to_skip_ns / 1e9)
 
-            self.leader_udp_sender.send_action_chunk(action_chunk, time_to_skip_ns)
-            self.follower_udp_sender.send_action_chunk(action_chunk, time_to_skip_ns)
-            self.dmp_start_idx += self.horizon
+        self.leader_udp_sender.send_action_chunk(action_chunk, time_to_skip_ns)
+        self.follower_udp_sender.send_action_chunk(action_chunk, time_to_skip_ns)
+        self.dmp_start_idx += self.horizon
 
-            if dmp_end_idx == len(self.dmp_output):
-                cprint("[RUNNER] DMP rollout finished sending (recording continues).", "cyan")
+        if dmp_end_idx == len(self.dmp_output):
+            cprint("[RUNNER] DMP rollout finished sending (recording continues).", "cyan")
 
     def run(self):
         try:
